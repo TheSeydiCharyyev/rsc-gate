@@ -8,6 +8,8 @@ X-ray for React Server Components.
 
 See exactly how many KB each `"use client"` ships to the browser — and **why** a server-safe module ended up in the client bundle, before React throws a cryptic boundary error.
 
+![rsc-xray analyzing a Next.js App Router project](assets/demo.gif)
+
 ```text
 rsc-xray v0.1.0 — ./my-app
   8 modules · 2 "use client" · 1 client-bundled · 1 boundary · 664 B app client JS (gzip 400 B)
