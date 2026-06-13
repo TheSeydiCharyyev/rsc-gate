@@ -1,0 +1,50 @@
+{
+  "name": "rsc-xray",
+  "version": "0.1.0",
+  "description": "X-ray for React Server Components: see your server/client boundaries, why modules became client, and what each \"use client\" costs.",
+  "type": "module",
+  "bin": {
+    "rsc-xray": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "react",
+    "rsc",
+    "react-server-components",
+    "nextjs",
+    "app-router",
+    "devtools",
+    "use-client",
+    "boundary",
+    "bundle-size"
+  ],
+  "author": "Seydi Charyyev",
+  "license": "MIT",
+  "homepage": "https://github.com/TheSeydiCharyyev/rsc-xray#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheSeydiCharyyev/rsc-xray.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TheSeydiCharyyev/rsc-xray/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "typescript": "^6.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.8"
+  }
+}

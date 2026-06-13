@@ -1,0 +1,216 @@
+import { readdirSync, statSync, existsSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { parseModule, type ParsedModule } from './parse.js';
+import { analyzeProps, type PropFinding, type PropsCrossing } from './props.js';
+import { createResolver, SOURCE_EXTS, type Resolver } from './resolve.js';
+
+export type Env = 'server' | 'client';
+
+export interface ModuleReport {
+  file: string; // relative to root, posix separators
+  directive: 'use client' | 'use server' | null;
+  envs: Env[];
+  /** For client-bundled modules (no directive): shortest import chain from an entry. */
+  clientChain?: string[];
+  /** Pure re-export barrel: no own code, ~0 bundle weight. */
+  pureReexport?: boolean;
+}
+
+export interface Boundary {
+  /** Import chain from the entry to the "use client" module (inclusive). */
+  chain: string[];
+  /** Names imported across the boundary ('*' = namespace/side-effect). */
+  names: string[];
+}
+
+export interface Analysis {
+  root: string;
+  appDir: string;
+  entries: string[];
+  modules: ModuleReport[];
+  boundaries: Boundary[];
+  /** JSX usages of client components inside server modules, with per-prop verdicts. */
+  propsCrossings: PropsCrossing[];
+  /** Serialization hazards: props that will fail to cross the boundary. */
+  propFindings: PropFinding[];
+  /** Server-only code reachable from the client bundle. */
+  serverOnlyViolations: ServerOnlyViolation[];
+}
+
+export interface ServerOnlyViolation {
+  /** Client module (directive 'use client' or evaluated in the client env). */
+  clientFile: string;
+  /** Import specifier that triggered the violation. */
+  imports: string;
+  reason: 'server-only-package';
+  message: string;
+}
+
+const SERVER_ONLY_PACKAGES = new Set(['server-only']);
+
+const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git', '.turbo', 'coverage']);
+const ENTRY_NAMES = /^(page|layout|template|loading|error|not-found|global-error|default|route)\.(tsx|ts|jsx|js)$/;
+
+function listSourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      if (!SKIP_DIRS.has(name)) out.push(...listSourceFiles(full));
+    } else if (SOURCE_EXTS.some((e) => full.endsWith(e))) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+interface Node {
+  parsed: ParsedModule;
+  envs: Set<Env>;
+  clientChain?: string[];
+  /** Re-export names already followed per env ('*' = all). */
+  followed: Map<Env, Set<string> | '*'>;
+}
+
+interface WorkItem {
+  file: string;
+  env: Env;
+  chain: string[];
+  /** Which exports of this module the importer asked for. '*' = everything. */
+  names: Set<string> | '*';
+}
+
+export function analyzeProject(root: string): Analysis {
+  const appDir = ['app', join('src', 'app')].map((d) => join(root, d)).find((d) => existsSync(d));
+  if (!appDir) throw new Error(`No app/ or src/app/ directory found under ${root}`);
+
+  const resolver: Resolver = createResolver(root);
+  const files = listSourceFiles(root);
+  const nodes = new Map<string, Node>();
+  for (const f of files) {
+    nodes.set(f, { parsed: parseModule(f), envs: new Set(), followed: new Map() });
+  }
+
+  const rel = (f: string) => relative(root, f).replaceAll('\\', '/');
+  const entries = files.filter((f) => f.startsWith(appDir) && ENTRY_NAMES.test(f.split(/[\\/]/).pop() ?? ''));
+
+  const boundaries: Boundary[] = [];
+  const boundaryKeys = new Set<string>();
+  const queue: WorkItem[] = entries.map((f) => ({ file: f, env: 'server', chain: [f], names: '*' as const }));
+
+  const push = (from: WorkItem, target: string, names: Set<string> | '*') => {
+    const node = nodes.get(target);
+    if (!node) return;
+    let env = from.env;
+    if (node.parsed.directive === 'use client' && from.env === 'server') {
+      env = 'client';
+      const chain = [...from.chain, target].map(rel);
+      const nameList = names === '*' ? ['*'] : [...names].sort();
+      const key = chain.join('>') + '|' + nameList.join(',');
+      if (!boundaryKeys.has(key)) {
+        boundaryKeys.add(key);
+        boundaries.push({ chain, names: nameList });
+      }
+    }
+    queue.push({ file: target, env, chain: [...from.chain, target], names });
+  };
+
+  while (queue.length > 0) {
+    const item = queue.shift()!;
+    const node = nodes.get(item.file);
+    if (!node) continue;
+
+    // Module evaluation: runs once per env. All plain imports execute.
+    if (!node.envs.has(item.env)) {
+      node.envs.add(item.env);
+      if (item.env === 'client' && !node.parsed.directive && !node.clientChain) {
+        node.clientChain = item.chain.map(rel);
+      }
+      for (const imp of node.parsed.imports) {
+        const target = resolver.resolve(item.file, imp.specifier);
+        if (!target) continue;
+        const names: Set<string> | '*' = imp.namespace || imp.sideEffectOnly ? '*' : imp.names;
+        push(item, target, names);
+      }
+    }
+
+    // Re-export following: only for names actually requested (tree-shaking semantics).
+    const followed = node.followed.get(item.env);
+    if (followed === '*') continue;
+    const done = followed ?? new Set<string>();
+
+    const forward = (specifier: string, importedName: string | '*') => {
+      const target = resolver.resolve(item.file, specifier);
+      if (!target) return;
+      push(item, target, importedName === '*' ? '*' : new Set([importedName]));
+    };
+
+    if (item.names === '*') {
+      node.followed.set(item.env, '*');
+      for (const re of node.parsed.reexports) {
+        if (re.wildcard) forward(re.specifier, '*');
+        else for (const n of re.named) forward(re.specifier, n.imported);
+      }
+    } else {
+      const fresh = [...item.names].filter((n) => !done.has(n));
+      if (fresh.length === 0) continue;
+      for (const n of fresh) done.add(n);
+      node.followed.set(item.env, done);
+      for (const n of fresh) {
+        if (node.parsed.localExportNames.has(n)) continue; // defined here — terminal
+        for (const re of node.parsed.reexports) {
+          if (re.wildcard) {
+            forward(re.specifier, n);
+          } else {
+            const hit = re.named.find((e) => e.exported === n);
+            if (hit) forward(re.specifier, hit.imported);
+          }
+        }
+      }
+    }
+  }
+
+  const modules: ModuleReport[] = [...nodes.entries()]
+    .filter(([, n]) => n.envs.size > 0)
+    .map(([f, n]) => ({
+      file: rel(f),
+      directive: n.parsed.directive,
+      envs: [...n.envs].sort() as Env[],
+      ...(n.clientChain ? { clientChain: n.clientChain } : {}),
+      ...(n.parsed.imports.length === 0 && n.parsed.localExportNames.size === 0 && n.parsed.reexports.length > 0
+        ? { pureReexport: true }
+        : {}),
+    }))
+    .sort((a, b) => a.file.localeCompare(b.file));
+
+  const { crossings, findings } = analyzeProps(nodes, resolver, rel);
+
+  // server-only package imported from a module that runs in the client.
+  const serverOnlyViolations: ServerOnlyViolation[] = [];
+  for (const [f, n] of nodes) {
+    if (!n.envs.has('client') && n.parsed.directive !== 'use client') continue;
+    for (const imp of n.parsed.imports) {
+      if (SERVER_ONLY_PACKAGES.has(imp.specifier)) {
+        serverOnlyViolations.push({
+          clientFile: rel(f),
+          imports: imp.specifier,
+          reason: 'server-only-package',
+          message: `"${imp.specifier}" marks a module as server-only, but this module ships to the client — the import will throw at build/runtime`,
+        });
+      }
+    }
+  }
+  serverOnlyViolations.sort((a, b) => a.clientFile.localeCompare(b.clientFile));
+
+  return {
+    root,
+    appDir: rel(appDir),
+    entries: entries.map(rel).sort(),
+    modules,
+    boundaries: boundaries.sort((a, b) => a.chain.join().localeCompare(b.chain.join())),
+    propsCrossings: crossings,
+    propFindings: findings,
+    serverOnlyViolations,
+  };
+}
