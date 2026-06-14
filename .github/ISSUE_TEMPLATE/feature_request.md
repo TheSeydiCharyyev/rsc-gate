@@ -8,7 +8,7 @@ assignees: ''
 
 **The problem**
 
-What RSC pain are you hitting that rsc-xray doesn't surface today?
+What RSC pain are you hitting that rsc-gate doesn't surface today?
 
 **Proposed output**
 

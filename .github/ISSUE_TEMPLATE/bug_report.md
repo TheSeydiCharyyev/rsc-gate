@@ -6,7 +6,7 @@ labels: bug
 assignees: ''
 ---
 
-**What rsc-xray reported**
+**What rsc-gate reported**
 
 Paste the relevant output (use `--no-color`).
 
@@ -17,7 +17,7 @@ What the correct boundary/why-chain/verdict should have been, and why.
 **Reproduction**
 
 - Next.js version:
-- rsc-xray version (`npx rsc-xray --help` shows it):
+- rsc-gate version (`npx rsc-gate --help` shows it):
 - A minimal snippet or repo if possible (the smaller the fixture, the faster the fix).
 
 **`--json` output (optional)**

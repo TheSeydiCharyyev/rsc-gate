@@ -1,10 +1,10 @@
 {
-  "name": "rsc-xray",
+  "name": "rsc-gate",
   "version": "0.1.0",
-  "description": "X-ray for React Server Components: see your server/client boundaries, why modules became client, and what each \"use client\" costs.",
+  "description": "Catch React Server Component boundary bugs before next build — non-serializable props, server-only leaks, and accidental client bundling — in CI and your editor.",
   "type": "module",
   "bin": {
-    "rsc-xray": "dist/cli.js"
+    "rsc-gate": "dist/cli.js"
   },
   "main": "dist/index.js",
   "files": [
@@ -21,20 +21,21 @@
     "react-server-components",
     "nextjs",
     "app-router",
-    "devtools",
     "use-client",
-    "boundary",
-    "bundle-size"
+    "serialization",
+    "server-only",
+    "ci",
+    "lint"
   ],
   "author": "Seydi Charyyev",
   "license": "MIT",
-  "homepage": "https://github.com/TheSeydiCharyyev/rsc-xray#readme",
+  "homepage": "https://github.com/TheSeydiCharyyev/rsc-gate#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TheSeydiCharyyev/rsc-xray.git"
+    "url": "git+https://github.com/TheSeydiCharyyev/rsc-gate.git"
   },
   "bugs": {
-    "url": "https://github.com/TheSeydiCharyyev/rsc-xray/issues"
+    "url": "https://github.com/TheSeydiCharyyev/rsc-gate/issues"
   },
   "engines": {
     "node": ">=18"

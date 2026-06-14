@@ -4,9 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — 2026-06-13
+## [0.1.0] — 2026-06-14
 
-First functional release.
+First release under the name **rsc-gate** (previously published as `rsc-xray`,
+now deprecated and pointing here). Repositioned around catching boundary bugs
+before build, in CI and the editor.
+
+### Fixed (false positives — the project's #1 principle)
+
+- A module-scope Server Action passed to a Client Component by reference is no
+  longer flagged as a non-serializable prop.
+- A wildcard re-export (`export * from …`) no longer marks an unrelated
+  server-only sibling that shares the same barrel as client (no fake
+  `server-only` leak).
+- A page/layout that is itself `"use client"` is now analyzed in the client
+  environment, so its boundaries and `server-only` leaks are detected.
+- A server component reached through a wildcard barrel is no longer
+  mis-attributed to the client file next to it.
 
 ### Added
 
@@ -28,4 +42,22 @@ First functional release.
 - `--strict` — exit code `2` on a serialization hazard, for CI.
 - `--json`, `--no-build`, `--no-color` flags.
 
-[0.1.0]: https://github.com/TheSeydiCharyyev/rsc-xray/releases/tag/v0.1.0
+- Server/client **boundary map** for the Next.js App Router, built by static
+  analysis (TypeScript compiler API) — no app execution, no React internals.
+- **Why-chains**: for every server-safe module that ends up in the client
+  bundle, the exact import chain that pulled it across a `"use client"`
+  boundary. Re-exports through barrel files are followed only for the names
+  actually imported, matching bundler tree-shaking.
+- **Bundle cost** per boundary: reads `.next/` client-reference manifests and
+  attributes real KB (raw + gzip) to each client component, separating
+  framework chunks from your own code.
+- **Prop serialization checks** at each boundary: flags functions, class
+  instances, and symbols before `next build` fails at prerender. Server
+  Actions are recognized and allowed.
+- **Server-only leak detection**: `server-only` code reachable from the client.
+- `--explain <code>` — fix guides for common RSC errors.
+- `--html [path]` — self-contained HTML report (no external assets).
+- `--strict` — exit code `2` on a serialization hazard, for CI.
+- `--json`, `--no-build`, `--no-color` flags.
+
+[0.1.0]: https://github.com/TheSeydiCharyyev/rsc-gate/releases/tag/v0.1.0

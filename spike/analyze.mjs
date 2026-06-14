@@ -107,7 +107,7 @@ for (const [f, m] of mods) {
 }
 
 // --- report ---
-console.log(`rsc-xray spike — ${rel(root) || root}\n`);
+console.log(`rsc-gate spike — ${rel(root) || root}\n`);
 console.log('MODULES');
 for (const [f, m] of [...mods].sort()) {
   const env = [...m.envs].join('+') || 'unreached';

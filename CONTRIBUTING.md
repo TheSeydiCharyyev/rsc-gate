@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in rsc-xray. Bug reports, fixtures that reproduce a
+Thanks for your interest in rsc-gate. Bug reports, fixtures that reproduce a
 real-world false positive, and focused fixes are all welcome.
 
 ## Development

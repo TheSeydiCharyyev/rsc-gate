@@ -1,6 +1,6 @@
 # Concepts
 
-rsc-xray reads your App Router source and (optionally) your `.next/` build, then
+rsc-gate reads your App Router source and (optionally) your `.next/` build, then
 reports five things. This is what each one means.
 
 ## Boundaries
@@ -19,7 +19,7 @@ a build is present (see [Bundle cost](#bundle-cost)).
 ## Client-bundled (why-chains)
 
 A module with **no** `"use client"` directive can still be shipped to the
-browser — because something the client imports pulls it in. rsc-xray shows the
+browser — because something the client imports pulls it in. rsc-gate shows the
 exact chain:
 
 ```text
@@ -36,13 +36,13 @@ component and imports it, so it lands in the client bundle. This is the
 
 **Barrels are handled like the bundler.** A client component importing one name
 from a barrel (`export { Button } from './Button'; export { Card } from './Card'`)
-does **not** drag the other exports into the client — rsc-xray follows re-exports
+does **not** drag the other exports into the client — rsc-gate follows re-exports
 only for the names actually imported, matching tree-shaking. A naive analyzer
-marks `Card` as client here; rsc-xray does not.
+marks `Card` as client here; rsc-gate does not.
 
 ## Bundle cost
 
-When a `next build` exists, rsc-xray reads the client-reference manifests and
+When a `next build` exists, rsc-gate reads the client-reference manifests and
 attributes real bytes to each client component:
 
 ```text
@@ -60,7 +60,7 @@ Run with `--no-build` to skip this and get the boundary map only.
 ## Prop serialization
 
 Props handed from a Server Component to a Client Component must be serializable.
-rsc-xray gives each prop a verdict:
+rsc-gate gives each prop a verdict:
 
 | Verdict | Meaning |
 |---------|---------|
@@ -80,7 +80,7 @@ fail the build before prerender does.
 ## Server-only leaks
 
 If a module that runs on the client imports the `server-only` package, the build
-(or runtime) will throw. rsc-xray flags it directly:
+(or runtime) will throw. rsc-gate flags it directly:
 
 ```text
 SERVER-ONLY LEAKS  server-only code reachable from the client bundle

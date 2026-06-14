@@ -14,7 +14,7 @@ describe('--html report (Ф5.1)', () => {
 
   it('includes boundary content and module count', () => {
     expect(html).toContain('components/ProductList.tsx');
-    expect(html).toContain('rsc-xray');
+    expect(html).toContain('rsc-gate');
   });
 
   it('is self-contained: no external CSS/JS is loaded', () => {

@@ -4,7 +4,7 @@ The same analysis the CLI runs is available as a library. Useful for custom CI
 checks, editor integrations, or dashboards.
 
 ```ts
-import { analyzeProject, readBuildInfo, renderHtml } from 'rsc-xray';
+import { analyzeProject, readBuildInfo, renderHtml } from 'rsc-gate';
 
 const analysis = analyzeProject('./my-app');
 
@@ -61,7 +61,7 @@ interface BuildInfo {
 ## Rendering helpers
 
 ```ts
-import { renderReport, renderHtml } from 'rsc-xray';
+import { renderReport, renderHtml } from 'rsc-gate';
 
 renderReport(analysis, { color: false, version: '0.1.0', build });  // ANSI/plain string
 renderHtml(analysis, build, '0.1.0');                                // self-contained HTML
@@ -70,7 +70,7 @@ renderHtml(analysis, build, '0.1.0');                                // self-con
 ## Explanations
 
 ```ts
-import { EXPLANATIONS, findExplanation } from 'rsc-xray';
+import { EXPLANATIONS, findExplanation } from 'rsc-gate';
 
 findExplanation('event-handlers');                       // by code
 findExplanation('Event handlers cannot be passed');      // by symptom substring

@@ -31,16 +31,16 @@ const color = !flags.has('--no-color') && process.stdout.isTTY !== false && !pro
 if (flags.has('--help') || flags.has('-h')) {
   console.log(
     [
-      `rsc-xray v${version} — X-ray for React Server Components`,
+      `rsc-gate v${version} — catch RSC boundary bugs before next build`,
       '',
-      'Usage: npx rsc-xray [dir] [flags]',
+      'Usage: npx rsc-gate [dir] [flags]',
       '',
       '  dir              Next.js App Router project root (default: cwd)',
       '  --json           machine-readable output',
       '  --no-color       plain text',
       '  --no-build       skip reading .next/ bundle-cost data',
       '  --strict         exit 2 when serialization hazards are found (CI gate)',
-      '  --html [path]    write a self-contained HTML report (default: rsc-xray-report.html)',
+      '  --html [path]    write a self-contained HTML report (default: rsc-gate-report.html)',
       '  --explain <code> show a fix guide for a known RSC error',
     ].join('\n'),
   );
@@ -53,7 +53,7 @@ if (flags.has('--explain')) {
     console.log(renderExplanation(found, { color }));
     process.exit(0);
   }
-  console.error(`rsc-xray: no explanation for '${explainQuery ?? ''}'.`);
+  console.error(`rsc-gate: no explanation for '${explainQuery ?? ''}'.`);
   console.error(renderExplanationList({ color }));
   process.exit(1);
 }
@@ -68,7 +68,7 @@ try {
   if (flags.has('--json')) {
     console.log(JSON.stringify({ ...analysis, build }, null, 2));
   } else if (flags.has('--html')) {
-    const out = resolve(htmlPathArg ?? 'rsc-xray-report.html');
+    const out = resolve(htmlPathArg ?? 'rsc-gate-report.html');
     writeFileSync(out, renderHtml(analysis, build, version), 'utf8');
     console.log(`report written to ${out}`);
   } else {
@@ -78,6 +78,6 @@ try {
     process.exit(2);
   }
 } catch (err) {
-  console.error(`rsc-xray: ${err instanceof Error ? err.message : String(err)}`);
+  console.error(`rsc-gate: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 }

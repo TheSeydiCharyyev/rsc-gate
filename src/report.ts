@@ -51,7 +51,7 @@ export function renderReport(a: Analysis, opts: RenderOptions): string {
   const bundled = a.modules.filter((m) => !m.directive && m.envs.includes('client') && !m.pureReexport);
   const costOf = (file: string) => build?.moduleCosts.find((m) => m.file === file);
 
-  lines.push(c('bold', `rsc-xray v${opts.version}`) + c('dim', ` — ${a.root}`));
+  lines.push(c('bold', `rsc-gate v${opts.version}`) + c('dim', ` — ${a.root}`));
   lines.push(
     '  ' +
       `${a.modules.length} modules · ` +
