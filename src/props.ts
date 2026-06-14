@@ -83,7 +83,10 @@ function resolveExportOrigin(
       }
     }
   }
-  return node.parsed.directive ? file : null;
+  // Reached a module that does not export `name` (e.g. a wildcard re-export that
+  // forwards to the wrong sibling). Do NOT claim the current file just because it
+  // has a directive — that mis-attributes a server component to a client file (FP #4).
+  return null;
 }
 
 /** Matches `Symbol(...)` and `Symbol.for(...)`. */
@@ -95,7 +98,7 @@ function isSymbolCallee(callee: ts.Expression): boolean {
   return false;
 }
 
-function isServerActionFn(fn: ts.ArrowFunction | ts.FunctionExpression): boolean {
+function isServerActionFn(fn: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration): boolean {
   if (!fn.body || !ts.isBlock(fn.body)) return false;
   const first = fn.body.statements[0];
   return (
@@ -138,10 +141,16 @@ export function analyzeProps(
 
     const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
 
-    // Local function declarations — passing them as props is the same hazard as inline arrows.
+    // Top-level local functions — passing one as a prop is the same hazard as an inline
+    // arrow, EXCEPT a function whose body opens with "use server" is a Server Action and
+    // is a legal prop. Track those separately so a reference to one is not flagged (FP #1).
     const localFns = new Set<string>();
+    const localActions = new Set<string>();
+    const note = (name: string, fn: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration) => {
+      (isServerActionFn(fn) ? localActions : localFns).add(name);
+    };
     for (const st of sf.statements) {
-      if (ts.isFunctionDeclaration(st) && st.name) localFns.add(st.name.text);
+      if (ts.isFunctionDeclaration(st) && st.name) note(st.name.text, st);
       if (ts.isVariableStatement(st)) {
         for (const d of st.declarationList.declarations) {
           if (
@@ -149,7 +158,7 @@ export function analyzeProps(
             d.initializer &&
             (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))
           ) {
-            localFns.add(d.name.text);
+            note(d.name.text, d.initializer);
           }
         }
       }
@@ -173,7 +182,7 @@ export function analyzeProps(
           return { name, verdict: 'symbol' };
         }
         if (ts.isIdentifier(expr)) {
-          if (actionLocals.has(expr.text)) return { name, verdict: 'ok' };
+          if (actionLocals.has(expr.text) || localActions.has(expr.text)) return { name, verdict: 'ok' };
           if (localFns.has(expr.text)) return { name, verdict: 'function-ref' };
         }
       }

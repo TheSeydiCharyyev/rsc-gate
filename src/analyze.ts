@@ -95,9 +95,37 @@ export function analyzeProject(root: string): Analysis {
   const rel = (f: string) => relative(root, f).replaceAll('\\', '/');
   const entries = files.filter((f) => f.startsWith(appDir) && ENTRY_NAMES.test(f.split(/[\\/]/).pop() ?? ''));
 
+  // Does `file` (transitively) export `name`? Lets a named re-export be forwarded only
+  // to the wildcard source that actually provides it, instead of every sibling barrel
+  // (which would mark unrelated server modules as client — FP #2).
+  const exportsName = (file: string, name: string, seen = new Set<string>()): boolean => {
+    if (seen.has(file)) return false;
+    seen.add(file);
+    const n = nodes.get(file);
+    if (!n) return false;
+    if (n.parsed.localExportNames.has(name)) return true;
+    for (const re of n.parsed.reexports) {
+      const t = resolver.resolve(file, re.specifier);
+      if (!t) continue;
+      if (re.wildcard) {
+        if (exportsName(t, name, seen)) return true;
+      } else {
+        const hit = re.named.find((e) => e.exported === name);
+        if (hit && exportsName(t, hit.imported, seen)) return true;
+      }
+    }
+    return false;
+  };
+
   const boundaries: Boundary[] = [];
   const boundaryKeys = new Set<string>();
-  const queue: WorkItem[] = entries.map((f) => ({ file: f, env: 'server', chain: [f], names: '*' as const }));
+  // A page/layout that is itself "use client" starts in the client env (FP #3).
+  const queue: WorkItem[] = entries.map((f) => ({
+    file: f,
+    env: nodes.get(f)?.parsed.directive === 'use client' ? 'client' : 'server',
+    chain: [f],
+    names: '*' as const,
+  }));
 
   const push = (from: WorkItem, target: string, names: Set<string> | '*') => {
     const node = nodes.get(target);
@@ -161,7 +189,8 @@ export function analyzeProject(root: string): Analysis {
         if (node.parsed.localExportNames.has(n)) continue; // defined here — terminal
         for (const re of node.parsed.reexports) {
           if (re.wildcard) {
-            forward(re.specifier, n);
+            const t = resolver.resolve(item.file, re.specifier);
+            if (t && exportsName(t, n)) forward(re.specifier, n); // only the source that has `n`
           } else {
             const hit = re.named.find((e) => e.exported === n);
             if (hit) forward(re.specifier, hit.imported);
