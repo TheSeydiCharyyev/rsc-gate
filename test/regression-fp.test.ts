@@ -67,6 +67,29 @@ describe('namespace re-export — `export * as ns` is followed, not terminal', (
   });
 });
 
+describe('FP #9 — tsconfig "extends" chain is merged for paths aliases', () => {
+  const a = fx('extends-alias');
+  const byFile = Object.fromEntries(a.modules.map((m) => [m.file, m]));
+  it('the "@/*" alias from the base config resolves (graph is not empty)', () => {
+    expect(byFile['src/components/Leaky.tsx']?.envs ?? []).toContain('client');
+  });
+  it('the leak behind the inherited alias is detected (was an empty "all clean" report)', () => {
+    expect(a.serverOnlyViolations.map((v) => v.clientFile)).toEqual(['src/components/Leaky.tsx']);
+  });
+  it('the boundary through the alias is recorded', () => {
+    expect(a.boundaries.some((b) => b.chain.at(-1) === 'src/components/Leaky.tsx')).toBe(true);
+  });
+});
+
+describe('malformed tsconfig.json — analyzer degrades instead of crashing', () => {
+  it('does not throw on syntactically broken JSON (Windows Debug Failure regression)', () => {
+    expect(() => fx('broken-tsconfig')).not.toThrow();
+  });
+  it('still analyzes the app entries', () => {
+    expect(fx('broken-tsconfig').modules.map((m) => m.file)).toContain('app/page.tsx');
+  });
+});
+
 describe('FP #4 — wildcard barrel does not mis-attribute a server component', () => {
   const a = fx('edge');
   it('the server-only <WidgetB> is not reported as a client-component crossing', () => {

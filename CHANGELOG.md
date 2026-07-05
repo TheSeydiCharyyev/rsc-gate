@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- tsconfig `"extends"` chains are now merged when loading `paths` aliases
+  (config is loaded through the TypeScript compiler itself). Previously a
+  preset/monorepo project declaring `@/*` in a base config lost every alias —
+  the import graph collapsed to the entries alone and the report read as
+  "all clean" (the worst kind of false result for a no-FP gate). `paths`
+  without `baseUrl` now also resolve TS-4.1-style: relative to the config
+  file that declares them. A syntactically broken tsconfig.json no longer
+  crashes the analyzer on Windows — it degrades to no aliases.
+
 - An orphan `"use client"` file — one no entry ever imports — is no longer
   reported as a `server-only` leak. A directive alone does not ship a module
   to the client; the leak is only real when the module is actually reachable
