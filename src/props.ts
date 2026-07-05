@@ -26,17 +26,38 @@ export interface PropFinding {
   message: string;
 }
 
-/** Built-ins React 19 serializes across the boundary — never flag `new X()` for these. */
+/**
+ * Built-ins React 19 serializes across the boundary — never flag `new X()` for these.
+ * Source of truth: ReactFlightServer.js renderModelDestructive() @ react v19.0.0
+ * (enableBinaryFlight and enableFlightReadableStream are both shipped as true).
+ * Error IS accepted — special-cased by the serializer (message redacted in prod,
+ * but the build does not fail). WeakMap/WeakSet/RegExp/URL are NOT accepted —
+ * they fall through to the plain-object check and throw at render.
+ */
 const SERIALIZABLE_CTORS = new Set([
   'Date',
   'Map',
   'Set',
-  'WeakMap',
-  'WeakSet',
   'Promise',
   'Array',
   'Error',
-  'RegExp',
+  'ArrayBuffer',
+  'DataView',
+  'Int8Array',
+  'Uint8Array',
+  'Uint8ClampedArray',
+  'Int16Array',
+  'Uint16Array',
+  'Int32Array',
+  'Uint32Array',
+  'Float32Array',
+  'Float64Array',
+  'BigInt64Array',
+  'BigUint64Array',
+  'Blob',
+  'File',
+  'FormData',
+  'ReadableStream',
 ]);
 
 const MESSAGES: Record<Exclude<PropVerdict, 'ok'>, string> = {

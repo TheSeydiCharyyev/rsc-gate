@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed (false positives — the project's #1 principle)
+
+- The serializable-constructor whitelist now matches what React 19 Flight
+  actually accepts for Server→Client props (verified against
+  `ReactFlightServer.js` @ react v19.0.0):
+  - `new ArrayBuffer()`, typed arrays (`Uint8Array` & co.), `DataView`,
+    `Blob`, `File`, `FormData` and `ReadableStream` are **no longer flagged**
+    as non-serializable class instances.
+  - `new RegExp()`, `new WeakMap()` and `new WeakSet()` are **now flagged** —
+    React throws on them at render (they were wrongly whitelisted).
+  - `new Error()` stays allowed: Flight serializes it (message redacted in
+    production, the build does not fail).
+  - `new URL()` stays flagged: React does not serialize URL instances.
+
 ## [0.1.0] — 2026-06-14
 
 First release under the name **rsc-gate** (previously published as `rsc-xray`,
