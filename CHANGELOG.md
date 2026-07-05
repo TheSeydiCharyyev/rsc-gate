@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `import('…')` and `next/dynamic(() => import('…'))` edges are now part of
+  the import graph. Lazily loaded client subtrees — charts, modals, maps —
+  used to vanish from the boundary map, why-chains, bundle cost and
+  `server-only` leak detection without warning. A dynamic import behaves like
+  `import * as`: it loads in the importer's environment and may use the whole
+  namespace. Non-literal specifiers (`import(variable)`) are not statically
+  knowable and are still skipped; `typeof import('…')` type positions never
+  create edges; `/* webpackIgnore: true */` / `turbopackIgnore` imports are
+  left alone — the bundler ships nothing for them.
+
 ### Fixed (false positives — the project's #1 principle)
 
 - Bundle cost now works on dynamic routes. The client-reference-manifest key
@@ -32,9 +44,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to the client; the leak is only real when the module is actually reachable
   from an app entry in the client environment. (Note: leak detection is now
   only as complete as the import graph — a client file the graph cannot reach
-  is silent. Known gaps, tracked separately: `next/dynamic`/`import()` edges
-  and tsconfig setups the resolver does not support yet — `extends`,
-  `baseUrl`-only bare specifiers, exact aliases.)
+  is silent. Dynamic-import edges, `extends` chains and exact aliases are
+  covered as of this release; the known remaining gap is `baseUrl`-only bare
+  specifiers.)
 - `export * as ns from './x'` is now followed correctly. It used to be
   recorded as a transparent wildcard AND a terminal local export — so the BFS
   stopped at the barrel (a client module behind it never got the client env,

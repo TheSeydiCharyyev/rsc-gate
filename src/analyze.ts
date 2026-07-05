@@ -226,8 +226,8 @@ export function analyzeProject(root: string): Analysis {
   // The module must actually be REACHED in the client env — a "use client"
   // directive alone is not enough: an orphan/WIP client file never ships,
   // so its server-only import cannot leak (FP #12). Flip side: detection is
-  // only as complete as the import graph (dynamic imports and unsupported
-  // tsconfig setups are the known reachability gaps).
+  // only as complete as the import graph (unsupported tsconfig setups, e.g.
+  // bare baseUrl specifiers, are the known reachability gaps).
   const serverOnlyViolations: ServerOnlyViolation[] = [];
   for (const [f, n] of nodes) {
     if (!n.envs.has('client')) continue;

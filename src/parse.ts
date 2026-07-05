@@ -12,6 +12,8 @@ export interface ImportEntry {
   /** import * as X — pulls everything */
   namespace: boolean;
   sideEffectOnly: boolean;
+  /** import('…') anywhere in the module — a lazy edge, loads in the importer's env. */
+  dynamic?: boolean;
 }
 
 export interface ReexportEntry {
@@ -132,6 +134,41 @@ export function parseModule(file: string): ParsedModule {
       }
     }
   }
+
+  // Dynamic imports — import('…') anywhere in the module, including inside
+  // next/dynamic(() => import('…')) (#7: lazy client subtrees used to vanish
+  // from the graph). The namespace object may expose everything, and the
+  // module evaluates in the importer's env, so it behaves like `import * as`.
+  // Only literal specifiers are statically knowable; `typeof import('…')` is
+  // a type node, not a CallExpression, so type positions never match.
+  const visitDynamic = (n: ts.Node): void => {
+    if (
+      ts.isCallExpression(n) &&
+      n.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      n.arguments.length > 0 &&
+      ts.isStringLiteralLike(n.arguments[0])
+    ) {
+      // import(/* webpackIgnore: true */ '…') — the bundler leaves the
+      // expression as-is and ships nothing, so there is no edge. The magic
+      // comment is mid-line trivia before the argument (getLeadingCommentRanges
+      // returns nothing for that position), so test the raw trivia slice.
+      const arg = n.arguments[0];
+      const trivia = sf.text.slice(arg.getFullStart(), arg.getStart(sf));
+      const bundlerIgnored = /(webpack|turbopack)Ignore\s*:\s*true/.test(trivia);
+      if (!bundlerIgnored) {
+        imports.push({
+          specifier: arg.text,
+          names: new Set(),
+          bindings: [],
+          namespace: true,
+          sideEffectOnly: false,
+          dynamic: true,
+        });
+      }
+    }
+    ts.forEachChild(n, visitDynamic);
+  };
+  visitDynamic(sf);
 
   return { file, directive, imports, reexports, localExportNames };
 }

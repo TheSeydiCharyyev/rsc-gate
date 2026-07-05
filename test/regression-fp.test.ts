@@ -105,6 +105,25 @@ describe('FP #10 — exact paths aliases (no /*) resolve', () => {
   });
 });
 
+describe('#7 — next/dynamic and import() edges are part of the graph', () => {
+  const a = fx('dynamic-import');
+  const byFile = Object.fromEntries(a.modules.map((m) => [m.file, m]));
+  it('a client component reached only via next/dynamic gets the client env', () => {
+    expect(byFile['components/Chart.tsx']?.envs ?? []).toContain('client');
+  });
+  it('its server-only leak is detected (used to vanish silently)', () => {
+    expect(a.serverOnlyViolations.map((v) => v.clientFile)).toEqual(['components/Chart.tsx']);
+  });
+  it('the lazy boundary is recorded', () => {
+    expect(a.boundaries.some((b) => b.chain.at(-1) === 'components/Chart.tsx')).toBe(true);
+  });
+  it('non-literal, webpackIgnore and typeof import() positions create no edges', () => {
+    // TypesOnly.ts and Ignored.tsx exist on disk — a wrongly-created edge would
+    // pull them into the module list (and Ignored would fake a leak).
+    expect(a.modules.map((m) => m.file).sort()).toEqual(['app/page.tsx', 'components/Chart.tsx']);
+  });
+});
+
 describe('malformed tsconfig.json — analyzer degrades instead of crashing', () => {
   it('does not throw on syntactically broken JSON (Windows Debug Failure regression)', () => {
     expect(() => fx('broken-tsconfig')).not.toThrow();
