@@ -38,7 +38,7 @@ export interface Analysis {
 }
 
 export interface ServerOnlyViolation {
-  /** Client module (directive 'use client' or evaluated in the client env). */
+  /** Client module — reached in the client env (a directive alone does not ship it). */
   clientFile: string;
   /** Import specifier that triggered the violation. */
   imports: string;
@@ -177,7 +177,7 @@ export function analyzeProject(root: string): Analysis {
     if (item.names === '*') {
       node.followed.set(item.env, '*');
       for (const re of node.parsed.reexports) {
-        if (re.wildcard) forward(re.specifier, '*');
+        if (re.wildcard || re.ns !== undefined) forward(re.specifier, '*');
         else for (const n of re.named) forward(re.specifier, n.imported);
       }
     } else {
@@ -186,6 +186,13 @@ export function analyzeProject(root: string): Analysis {
       for (const n of fresh) done.add(n);
       node.followed.set(item.env, done);
       for (const n of fresh) {
+        // `export * as n from …`: the namespace object exposes the whole source —
+        // requesting `n` must pull it, even though `n` is also a local export name.
+        const nsSources = node.parsed.reexports.filter((re) => re.ns === n);
+        if (nsSources.length > 0) {
+          for (const re of nsSources) forward(re.specifier, '*');
+          continue;
+        }
         if (node.parsed.localExportNames.has(n)) continue; // defined here — terminal
         for (const re of node.parsed.reexports) {
           if (re.wildcard) {
@@ -216,9 +223,14 @@ export function analyzeProject(root: string): Analysis {
   const { crossings, findings } = analyzeProps(nodes, resolver, rel);
 
   // server-only package imported from a module that runs in the client.
+  // The module must actually be REACHED in the client env — a "use client"
+  // directive alone is not enough: an orphan/WIP client file never ships,
+  // so its server-only import cannot leak (FP #12). Flip side: detection is
+  // only as complete as the import graph (dynamic imports and unsupported
+  // tsconfig setups are the known reachability gaps).
   const serverOnlyViolations: ServerOnlyViolation[] = [];
   for (const [f, n] of nodes) {
-    if (!n.envs.has('client') && n.parsed.directive !== 'use client') continue;
+    if (!n.envs.has('client')) continue;
     for (const imp of n.parsed.imports) {
       if (SERVER_ONLY_PACKAGES.has(imp.specifier)) {
         serverOnlyViolations.push({

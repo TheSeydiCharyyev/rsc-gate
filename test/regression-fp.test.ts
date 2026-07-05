@@ -40,6 +40,33 @@ describe('FP #3 — a "use client" page is treated as client', () => {
   });
 });
 
+describe('FP #12 — orphan "use client" file is not a server-only leak', () => {
+  const a = fx('orphan-leak');
+  it('the unreachable Orphan.tsx is NOT flagged despite importing server-only', () => {
+    expect(a.serverOnlyViolations.map((v) => v.clientFile)).not.toContain('components/Orphan.tsx');
+  });
+  it('the reachable leak is still flagged (detector not over-silenced)', () => {
+    expect(a.serverOnlyViolations.map((v) => v.clientFile)).toEqual(['components/Reachable.tsx']);
+  });
+  it('the orphan never appears among analyzed modules (no env)', () => {
+    expect(a.modules.map((m) => m.file)).not.toContain('components/Orphan.tsx');
+  });
+});
+
+describe('namespace re-export — `export * as ns` is followed, not terminal', () => {
+  const a = fx('ns-reexport');
+  const byFile = Object.fromEntries(a.modules.map((m) => [m.file, m]));
+  it('the client module behind the namespace barrel gets the client env', () => {
+    expect(byFile['components/widgets.tsx']?.envs ?? []).toContain('client');
+  });
+  it('its server-only import is detected (was silently dropped)', () => {
+    expect(a.serverOnlyViolations.map((v) => v.clientFile)).toEqual(['components/widgets.tsx']);
+  });
+  it('the boundary through the barrel is recorded', () => {
+    expect(a.boundaries.some((b) => b.chain.at(-1) === 'components/widgets.tsx')).toBe(true);
+  });
+});
+
 describe('FP #4 — wildcard barrel does not mis-attribute a server component', () => {
   const a = fx('edge');
   it('the server-only <WidgetB> is not reported as a client-component crossing', () => {

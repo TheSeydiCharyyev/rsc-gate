@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- An orphan `"use client"` file — one no entry ever imports — is no longer
+  reported as a `server-only` leak. A directive alone does not ship a module
+  to the client; the leak is only real when the module is actually reachable
+  from an app entry in the client environment. (Note: leak detection is now
+  only as complete as the import graph — a client file the graph cannot reach
+  is silent. Known gaps, tracked separately: `next/dynamic`/`import()` edges
+  and tsconfig setups the resolver does not support yet — `extends`,
+  `baseUrl`-only bare specifiers, exact aliases.)
+- `export * as ns from './x'` is now followed correctly. It used to be
+  recorded as a transparent wildcard AND a terminal local export — so the BFS
+  stopped at the barrel (a client module behind it never got the client env,
+  hiding its `server-only` leak), while plain named lookups could leak
+  *through* the namespace (phantom edges). Now only the `ns` binding is
+  importable, and requesting it pulls the whole source module.
 - The serializable-constructor whitelist now matches what React 19 Flight
   actually accepts for Server→Client props (verified against
   `ReactFlightServer.js` @ react v19.0.0):

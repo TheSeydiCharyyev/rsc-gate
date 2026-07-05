@@ -16,9 +16,11 @@ export interface ImportEntry {
 
 export interface ReexportEntry {
   specifier: string;
-  /** export * from './x' (or export * as ns) */
+  /** export * from './x' — forwards the source's names transparently. */
   wildcard: boolean;
   named: { imported: string; exported: string }[];
+  /** export * as ns from './x' — exposes ONLY `ns`; importing it pulls the whole source. */
+  ns?: string;
 }
 
 export interface ParsedModule {
@@ -94,8 +96,14 @@ export function parseModule(file: string): ParsedModule {
         if (!st.exportClause) {
           reexports.push({ specifier: st.moduleSpecifier.text, wildcard: true, named: [] });
         } else if (ts.isNamespaceExport(st.exportClause)) {
-          // export * as ns from './x' — conservative: everything
-          reexports.push({ specifier: st.moduleSpecifier.text, wildcard: true, named: [] });
+          // export * as ns from './x' — NOT a transparent wildcard: only `ns` is
+          // importable, and requesting it must pull the whole source module.
+          reexports.push({
+            specifier: st.moduleSpecifier.text,
+            wildcard: false,
+            named: [],
+            ns: st.exportClause.name.text,
+          });
           localExportNames.add(st.exportClause.name.text);
         } else {
           const named = st.exportClause.elements
