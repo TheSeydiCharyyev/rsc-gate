@@ -7,7 +7,7 @@ export default defineConfig({
   target: 'node18',
   clean: true,
   minify: false,
-  // dts disabled: typescript@6 turns the baseUrl deprecation into a build error.
-  // The package is CLI-first; bundled type declarations will return in 0.1.1.
-  dts: false,
+  // tsup injects baseUrl into the dts pass, which typescript@6 deprecates
+  // into a hard error — silence just that deprecation, just for dts.
+  dts: { compilerOptions: { ignoreDeprecations: '6.0' } },
 });

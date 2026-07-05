@@ -17,6 +17,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   knowable and are still skipped; `typeof import('…')` type positions never
   create edges; `/* webpackIgnore: true */` / `turbopackIgnore` imports are
   left alone — the bundler ships nothing for them.
+- Bundled type declarations are back: `dist/index.d.ts` ships again, and
+  package.json now declares `types` and an `exports` map (`.` →
+  types/import + `./package.json`). Verified against consumers on all three
+  TS resolution modes — `node16`, `nodenext`, `bundler` — plus a runtime
+  smoke test from the packed tarball. (tsup injects `baseUrl` into its dts
+  pass, which typescript@6 turns into a hard error — silenced via a
+  dts-scoped `ignoreDeprecations`.)
 
 ### Fixed (false positives — the project's #1 principle)
 
