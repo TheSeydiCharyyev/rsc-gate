@@ -26,6 +26,34 @@ describe('parseManifestText', () => {
   });
 });
 
+// FP #8: the manifest key of a dynamic route contains "]" — "/products/[id]/page".
+// The old regex ([^\]]*) stopped at the first "]" and skipped the whole manifest.
+const DYNAMIC_SAMPLE = `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};
+globalThis.__RSC_MANIFEST["/products/[id]/page"] = {"moduleLoading":{"prefix":""},"clientModules":{` +
+  `"[project]/myapp/components/ProductCard.tsx":{"id":3,"name":"*","chunks":["/_next/static/chunks/product.js"],"async":false}}};
+globalThis.__RSC_MANIFEST["/blog/[...slug]/page"] = {"clientModules":{` +
+  `"[project]/myapp/components/PostBody.tsx":{"id":4,"name":"*","chunks":["/_next/static/chunks/post.js"],"async":false}}};`;
+
+describe('parseManifestText — dynamic route keys (FP #8)', () => {
+  const entries = parseManifestText(DYNAMIC_SAMPLE);
+
+  it('parses a "[id]" dynamic-route manifest instead of silently skipping it', () => {
+    const card = entries.find((e) => e.modulePath === 'myapp/components/ProductCard.tsx');
+    expect(card).toBeDefined();
+    expect(card!.chunks).toEqual(['/_next/static/chunks/product.js']);
+  });
+
+  it('parses a "[...slug]" catch-all manifest too', () => {
+    const post = entries.find((e) => e.modulePath === 'myapp/components/PostBody.tsx');
+    expect(post).toBeDefined();
+    expect(post!.chunks).toEqual(['/_next/static/chunks/post.js']);
+  });
+
+  it('static-route keys still parse (no regression)', () => {
+    expect(parseManifestText(SAMPLE).length).toBeGreaterThan(0);
+  });
+});
+
 const nextDemo = fileURLToPath(new URL('../fixtures/next-demo', import.meta.url));
 const hasBuild = existsSync(join(nextDemo, '.next', 'server', 'app'));
 

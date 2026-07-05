@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- Bundle cost now works on dynamic routes. The client-reference-manifest key
+  of a dynamic route contains `]` — `"/products/[id]/page"` — and the parser
+  regex stopped at the first `]`, silently skipping the whole manifest, so
+  `[id]`/`[...slug]` routes reported empty or `null` cost.
 - Exact `paths` aliases — `"@/lib": ["./src/lib"]`, no `/*` — now resolve
   instead of being silently ignored. Semantics mirror tsc and Next's paths
   plugin: an exact match takes precedence over pattern aliases and is
