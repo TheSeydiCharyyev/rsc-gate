@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "@/leaky": ["./src/components/Leaky"],
+      "@/lib": ["./src/lib"],
+      "@/ghost": ["./src/nope"],
+      "@/*": ["./src/*"],
+      "untyped-pkg": ["./types/untyped-pkg.d.ts"]
+    }
+  }
+}

@@ -81,6 +81,30 @@ describe('FP #9 — tsconfig "extends" chain is merged for paths aliases', () =>
   });
 });
 
+describe('FP #10 — exact paths aliases (no /*) resolve', () => {
+  const a = fx('exact-alias');
+  const byFile = Object.fromEntries(a.modules.map((m) => [m.file, m]));
+  it('an exact alias to a file resolves (leak detected)', () => {
+    expect(a.serverOnlyViolations.map((v) => v.clientFile)).toEqual(['src/components/Leaky.tsx']);
+  });
+  it('an exact alias to a directory resolves via its index', () => {
+    expect(byFile['src/lib/index.ts']?.envs ?? []).toContain('server');
+  });
+  it('a .d.ts type shim target never enters the graph (Next skips it and bundles the real package)', () => {
+    expect(a.modules.map((m) => m.file)).not.toContain('types/untyped-pkg.d.ts');
+  });
+  it('a matched exact key with a dead target is definitive — no fallback to "@/*"', () => {
+    expect(a.modules.map((m) => m.file)).not.toContain('src/ghost.ts');
+  });
+  it('unlisted bare specifiers stay external (nothing extra analyzed)', () => {
+    expect(a.modules.map((m) => m.file).sort()).toEqual([
+      'app/page.tsx',
+      'src/components/Leaky.tsx',
+      'src/lib/index.ts',
+    ]);
+  });
+});
+
 describe('malformed tsconfig.json — analyzer degrades instead of crashing', () => {
   it('does not throw on syntactically broken JSON (Windows Debug Failure regression)', () => {
     expect(() => fx('broken-tsconfig')).not.toThrow();

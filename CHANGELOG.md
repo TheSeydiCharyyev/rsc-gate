@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- Exact `paths` aliases — `"@/lib": ["./src/lib"]`, no `/*` — now resolve
+  instead of being silently ignored. Semantics mirror tsc and Next's paths
+  plugin: an exact match takes precedence over pattern aliases and is
+  definitive (no pattern fallback on a miss), and `.d.ts`/`.d.mts`/`.d.cts`
+  targets — types-only shims for untyped packages — are skipped, since Next
+  bundles the real package, never the declaration file.
 - tsconfig `"extends"` chains are now merged when loading `paths` aliases
   (config is loaded through the TypeScript compiler itself). Previously a
   preset/monorepo project declaring `@/*` in a base config lost every alias —

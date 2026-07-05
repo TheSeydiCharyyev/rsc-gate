@@ -24,6 +24,7 @@ function tryFile(base: string): string | null {
 /** Minimal tsconfig "paths" support: prefix patterns like "@/*": ["./*"]. */
 export function createResolver(projectRoot: string): Resolver {
   const aliases: { prefix: string; targets: string[] }[] = [];
+  const exactAliases = new Map<string, string[]>();
   // Forward slashes: TS normalizes paths in diagnostics, and a backslash path
   // makes it throw a Debug Failure on malformed JSON instead of degrading.
   const tsconfigPath = join(projectRoot, 'tsconfig.json').replaceAll('\\', '/');
@@ -51,6 +52,16 @@ export function createResolver(projectRoot: string): Resolver {
           prefix: pattern.slice(0, -1),
           targets: targets.map((t) => resolve(baseUrl, t.replace(/\*$/, ''))),
         });
+      } else if (!pattern.includes('*')) {
+        // Exact alias, e.g. "@/lib": ["./src/lib"] — matches the specifier as
+        // a whole (FP #10: these were silently dropped). Declaration-file
+        // targets (.d.ts type shims for untyped packages) are types-only:
+        // Next's paths plugin skips them and bundles the real package, so
+        // resolving them here would invent a phantom client-bundled module.
+        exactAliases.set(
+          pattern,
+          targets.filter((t) => !/\.d\.(ts|mts|cts)$/.test(t)).map((t) => resolve(baseUrl, t)),
+        );
       }
     }
   }
@@ -59,6 +70,18 @@ export function createResolver(projectRoot: string): Resolver {
     resolve(fromFile, specifier) {
       if (specifier.startsWith('.')) {
         return tryFile(resolve(dirname(fromFile), specifier));
+      }
+      // TS gives an exact paths match precedence over pattern matches — and a
+      // matched key is definitive: no fallback to pattern aliases on a miss
+      // (tsc fails the resolution; Next falls back to node_modules — external
+      // either way).
+      const exact = exactAliases.get(specifier);
+      if (exact) {
+        for (const t of exact) {
+          const hit = tryFile(t);
+          if (hit) return hit;
+        }
+        return null;
       }
       for (const { prefix, targets } of aliases) {
         if (specifier.startsWith(prefix)) {
