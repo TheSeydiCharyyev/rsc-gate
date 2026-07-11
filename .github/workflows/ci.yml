@@ -14,8 +14,8 @@ jobs:
         node: [20, 22]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -40,20 +40,41 @@ jobs:
         run: |
           node dist/cli.js fixtures/frozen-build --no-color | grep -q "BUNDLE COST" \
             || { echo "no BUNDLE COST section — the frozen .next snapshot is not being read"; exit 1; }
-      - name: Strict gate catches the planted hazard
+      # The --strict exit code of EVERY fixture, both directions. 0.2.0 shipped a
+      # false positive that failed a healthy project's CI — the release checks
+      # covered packaging and the API, but never asserted that a clean project
+      # still exits 0. This is that missing assertion, and it is not optional:
+      # for a tool that sells itself as a CI gate, firing on healthy code is the
+      # worst bug it can have.
+      - name: Strict gate — exit code of every fixture
         shell: bash
         run: |
-          if node dist/cli.js fixtures/demo --strict > /dev/null 2>&1; then
-            echo "expected exit 2 on hazardous fixture" && exit 1
-          fi
+          set -u
+          fail=0
+          expect() {
+            node dist/cli.js "fixtures/$1" --strict > /dev/null 2>&1
+            got=$?
+            if [ "$got" != "$2" ]; then
+              echo "FAIL  fixtures/$1: expected exit $2, got $got"
+              fail=1
+            fi
+          }
 
-      - name: Strict gate catches a server-only leak
-        shell: bash
-        run: |
-          if node dist/cli.js fixtures/orphan-leak --strict > /dev/null 2>&1; then
-            echo "expected exit 2 on a server-only leak" && exit 1
-          fi
+          # Must FAIL the build — a real hazard or a real leak.
+          for f in demo serialize orphan-leak client-entry dynamic-import \
+                   exact-alias extends-alias ns-reexport ns-tags commonjs \
+                   baseurl-bare jsconfig nested-props monorepo; do
+            expect "$f" 2
+          done
 
-      - name: Strict gate stays quiet on a clean project
-        shell: bash
-        run: node dist/cli.js fixtures/edge --strict > /dev/null
+          # Must PASS — healthy projects. A gate that fires here is useless.
+          #   server-only-alias: "server-only" aliased to a local shim — the 0.2.0 FP
+          #   no-baseurl:        bare specifier, no baseUrl — nothing resolves, nothing leaks
+          #   wildcard-leak:     barrel re-export that must not fake a leak
+          #   action-ref:        a Server Action passed by reference is legal
+          for f in edge action-ref wildcard-leak frozen-build broken-tsconfig \
+                   no-baseurl server-only-alias next-demo; do
+            expect "$f" 0
+          done
+
+          exit $fail
