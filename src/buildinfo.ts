@@ -13,25 +13,36 @@ export interface ChunkCost {
   url: string;
   bytes: number;
   gzipBytes: number;
-  /** Referenced by framework (node_modules) client components too. */
-  framework: boolean;
+  /**
+   * A node_modules client module references this chunk too, so the bundler may
+   * have co-bundled project code into it — the manifest cannot tell us. Its
+   * bytes are therefore never billed to the app (#13): they are reported
+   * separately rather than silently dropped or silently charged.
+   */
+  sharedWithFramework: boolean;
   /** Other project "use client" modules sharing this chunk. */
   sharedWith: string[];
 }
 
 export interface ModuleCost {
   file: string; // analysis-relative posix path
+  /** Chunks only this project's modules reference — definitely our code. */
   ownBytes: number;
   ownGzipBytes: number;
-  frameworkBytes: number;
+  /** Chunks co-bundled with the framework — may hold our code, not attributable. */
+  sharedBytes: number;
+  sharedGzipBytes: number;
   chunks: ChunkCost[];
 }
 
 export interface BuildInfo {
   distDir: string;
-  /** Distinct non-framework chunk bytes across all matched modules. */
+  /** Distinct own-chunk bytes across all matched modules. */
   appBytes: number;
   appGzipBytes: number;
+  /** Distinct co-bundled-with-framework bytes. Not part of appBytes. */
+  sharedBytes: number;
+  sharedGzipBytes: number;
   moduleCosts: ModuleCost[];
 }
 
@@ -131,8 +142,11 @@ export function readBuildInfo(root: string, clientFiles: string[]): BuildInfo | 
   }
   if (modules.size === 0) return null;
 
-  // Chunks referenced by framework (node_modules) client components are shared
-  // infrastructure — never attributed to a project boundary.
+  // A chunk a node_modules client module references is not ours to bill. But if
+  // a project module references it as well, the bundler may have co-bundled our
+  // code into it, and the manifest does not say. Calling such a chunk "framework"
+  // and dropping it (#13) reports "0 B" for code that does ship; calling it ours
+  // overcharges. It gets its own category, and the report always names it.
   const frameworkChunks = new Set<string>();
   for (const m of modules.values()) {
     if (m.fromNodeModules) for (const c of m.chunks) frameworkChunks.add(c);
@@ -175,27 +189,40 @@ export function readBuildInfo(root: string, clientFiles: string[]): BuildInfo | 
       const sharedWith = [...matched.entries()]
         .filter(([other, om]) => other !== file && om.chunks.includes(url))
         .map(([other]) => other);
-      return { url, bytes, gzipBytes, framework: frameworkChunks.has(url), sharedWith };
+      return { url, bytes, gzipBytes, sharedWithFramework: frameworkChunks.has(url), sharedWith };
     });
-    const own = chunks.filter((c) => !c.framework);
+    const own = chunks.filter((c) => !c.sharedWithFramework);
+    const shared = chunks.filter((c) => c.sharedWithFramework);
     moduleCosts.push({
       file,
       ownBytes: own.reduce((s, c) => s + c.bytes, 0),
       ownGzipBytes: own.reduce((s, c) => s + c.gzipBytes, 0),
-      frameworkBytes: chunks.filter((c) => c.framework).reduce((s, c) => s + c.bytes, 0),
+      sharedBytes: shared.reduce((s, c) => s + c.bytes, 0),
+      sharedGzipBytes: shared.reduce((s, c) => s + c.gzipBytes, 0),
       chunks,
     });
   }
 
+  // Distinct chunks: two modules in one chunk must not double-count it.
   const distinctOwn = new Map<string, { bytes: number; gzipBytes: number }>();
+  const distinctShared = new Map<string, { bytes: number; gzipBytes: number }>();
   for (const mc of moduleCosts) {
-    for (const c of mc.chunks) if (!c.framework) distinctOwn.set(c.url, { bytes: c.bytes, gzipBytes: c.gzipBytes });
+    for (const c of mc.chunks) {
+      const into = c.sharedWithFramework ? distinctShared : distinctOwn;
+      into.set(c.url, { bytes: c.bytes, gzipBytes: c.gzipBytes });
+    }
   }
+  const total = (m: Map<string, { bytes: number; gzipBytes: number }>, key: 'bytes' | 'gzipBytes') =>
+    [...m.values()].reduce((s, c) => s + c[key], 0);
 
   return {
     distDir,
-    appBytes: [...distinctOwn.values()].reduce((s, c) => s + c.bytes, 0),
-    appGzipBytes: [...distinctOwn.values()].reduce((s, c) => s + c.gzipBytes, 0),
-    moduleCosts: moduleCosts.sort((a, b) => b.ownBytes - a.ownBytes),
+    appBytes: total(distinctOwn, 'bytes'),
+    appGzipBytes: total(distinctOwn, 'gzipBytes'),
+    sharedBytes: total(distinctShared, 'bytes'),
+    sharedGzipBytes: total(distinctShared, 'gzipBytes'),
+    // Sort by what the module actually costs us, own first, then the ambiguous
+    // part — a co-bundled module must not sink to the bottom as if it were free.
+    moduleCosts: moduleCosts.sort((a, b) => b.ownBytes - a.ownBytes || b.sharedBytes - a.sharedBytes),
   };
 }

@@ -63,7 +63,7 @@ other path explicitly. Unknown options are an error, not a silent no-op.
 - **`server-only` leaks** — server-only code reachable from a module that ships to the client.
 - **Accidental client bundling** — the exact import chain that dragged a server-safe file across a `"use client"` boundary, so a stray import doesn't quietly grow your client bundle.
 - **Boundary map** — which modules are server, which are client, and where each `"use client"` boundary sits. Matches the build's own client-reference manifest.
-- **Bundle cost per boundary** *(optional)* — when a build exists, how many KB (and gzip) each client component ships, framework chunks separated from your own code.
+- **Bundle cost per boundary** *(optional)* — when a build exists, how many KB (and gzip) each client component ships. Chunks that are only yours are counted; chunks the framework co-bundles your code into are reported separately rather than guessed at — and a component with no chunk of its own is never passed off as free.
 
 ## Why static, before build
 

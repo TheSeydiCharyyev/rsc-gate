@@ -1,5 +1,5 @@
 import type { Analysis } from './analyze.js';
-import type { BuildInfo } from './buildinfo.js';
+import type { BuildInfo, ModuleCost } from './buildinfo.js';
 import { formatBytes } from './report.js';
 
 function esc(s: string): string {
@@ -36,15 +36,26 @@ export function renderHtml(a: Analysis, build: BuildInfo | null, version: string
   const costOf = (file: string) => build?.moduleCosts.find((m) => m.file === file);
 
   const lede = build
-    ? `<b>${formatBytes(build.appBytes)}</b> of app client JS across <b>${a.boundaries.length}</b> server→client ${a.boundaries.length === 1 ? 'boundary' : 'boundaries'} <span class="dim">(gzip ${formatBytes(build.appGzipBytes)})</span>`
+    ? `<b>${formatBytes(build.appBytes)}</b> of app client JS across <b>${a.boundaries.length}</b> server→client ${a.boundaries.length === 1 ? 'boundary' : 'boundaries'} <span class="dim">(gzip ${formatBytes(build.appGzipBytes)})</span>` +
+      (build.sharedBytes > 0
+        ? ` <span class="dim">+ ${formatBytes(build.sharedBytes)} co-bundled with framework, not attributable</span>`
+        : '')
     : `<b>${clientModules.length}</b> "use client" modules across <b>${a.boundaries.length}</b> ${a.boundaries.length === 1 ? 'boundary' : 'boundaries'} — run <code>next build</code> for bundle cost`;
+
+  // "0 B" would read as free for a module whose only chunk is the framework's.
+  const ownCell = (cost: ModuleCost | undefined) => {
+    if (!cost) return '<span class="dim">—</span>';
+    if (cost.ownBytes === 0 && cost.sharedBytes > 0) {
+      return `<span class="dim">co-bundled (${formatBytes(cost.sharedBytes)})</span>`;
+    }
+    return formatBytes(cost.ownBytes);
+  };
 
   const boundaryRows = a.boundaries
     .map((b) => {
       const from = b.chain.length >= 2 ? b.chain[b.chain.length - 2] : b.chain[0];
       const to = b.chain[b.chain.length - 1];
-      const cost = costOf(to);
-      return `<tr><td>${esc(from)}</td><td><code>${esc(to)}</code></td><td class="dim">${esc(b.names.join(', '))}</td><td>${cost ? formatBytes(cost.ownBytes) : '<span class="dim">—</span>'}</td></tr>`;
+      return `<tr><td>${esc(from)}</td><td><code>${esc(to)}</code></td><td class="dim">${esc(b.names.join(', '))}</td><td>${ownCell(costOf(to))}</td></tr>`;
     })
     .join('');
 
@@ -80,9 +91,10 @@ export function renderHtml(a: Analysis, build: BuildInfo | null, version: string
   const costRows = build
     ? build.moduleCosts
         .map((mc) => {
-          const own = mc.chunks.filter((ch) => !ch.framework);
-          const shared = [...new Set(own.flatMap((ch) => ch.sharedWith))];
-          return `<tr><td><code>${esc(mc.file)}</code></td><td>${formatBytes(mc.ownBytes)}</td><td class="dim">${formatBytes(mc.ownGzipBytes)}</td><td class="dim">${shared.length ? esc(shared.join(', ')) : '—'}</td></tr>`;
+          const own = mc.chunks.filter((ch) => !ch.sharedWithFramework);
+          const peers = [...new Set(own.flatMap((ch) => ch.sharedWith))];
+          const coBundled = mc.sharedBytes > 0 ? formatBytes(mc.sharedBytes) : '—';
+          return `<tr><td><code>${esc(mc.file)}</code></td><td>${ownCell(mc)}</td><td class="dim">${formatBytes(mc.ownGzipBytes)}</td><td class="dim">${coBundled}</td><td class="dim">${peers.length ? esc(peers.join(', ')) : '—'}</td></tr>`;
         })
         .join('')
     : '';
@@ -122,7 +134,7 @@ ${bundledCards || '<div class="dim">none</div>'}
 
 ${a.serverOnlyViolations.length ? `<h2>Server-only leaks</h2>${leakCards}` : ''}
 
-${build ? `<h2>Bundle cost — your code, framework excluded</h2><table><thead><tr><th>module</th><th>own</th><th>gzip</th><th>shared with</th></tr></thead><tbody>${costRows}</tbody></table>` : ''}
+${build ? `<h2>Bundle cost</h2><p class="dim"><b>own</b> — chunks only your code is in. <b>co-bundled</b> — chunks the framework is in too: they may carry your code, and the manifest cannot say how much, so they are never billed to the app total.</p><table><thead><tr><th>module</th><th>own</th><th>gzip</th><th>co-bundled</th><th>shared with</th></tr></thead><tbody>${costRows}</tbody></table>` : ''}
 
 <h2>Modules</h2>
 <table><tbody>${moduleRows}</tbody></table>

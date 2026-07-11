@@ -70,7 +70,15 @@ export function renderReport(a: Analysis, opts: RenderOptions): string {
     const from = b.chain.length >= 2 ? b.chain[b.chain.length - 2] : b.chain[0];
     const to = b.chain[b.chain.length - 1];
     const cost = costOf(to);
-    const costNote = cost ? `  ${c('yellow', `ships ${formatBytes(cost.ownBytes)} app JS`)}` : '';
+    // "ships 0 B" would be a lie when every chunk this module lives in is also
+    // the framework's — we cannot size its code, but it is not free (#13).
+    const costNote = !cost
+      ? ''
+      : cost.ownBytes > 0
+        ? `  ${c('yellow', `ships ${formatBytes(cost.ownBytes)} app JS`)}`
+        : cost.sharedBytes > 0
+          ? `  ${c('yellow', 'co-bundled with framework')}`
+          : '';
     lines.push(`  ${from} ${c('cyan', '→ ' + to)}  ${c('dim', `imports: ${b.names.join(', ')}`)}${costNote}`);
   }
   if (!build) lines.push(c('dim', '  (run `next build` to see per-boundary bundle cost)'));
@@ -129,17 +137,28 @@ export function renderReport(a: Analysis, opts: RenderOptions): string {
     lines.push(c('bold', 'BUNDLE COST') + c('dim', `  from ${build.distDir}`));
     lines.push(
       `  app client JS: ${c('bold', formatBytes(build.appBytes))}` +
-        c('dim', ` (gzip ${formatBytes(build.appGzipBytes)}) — your code, framework chunks excluded`),
+        c('dim', ` (gzip ${formatBytes(build.appGzipBytes)}) — chunks only your code is in`),
     );
-    for (const mc of build.moduleCosts) {
-      const own = mc.chunks.filter((ch) => !ch.framework);
-      const shared = [...new Set(own.flatMap((ch) => ch.sharedWith))];
+    if (build.sharedBytes > 0) {
       lines.push(
-        `  ${c('cyan', mc.file)}  ${formatBytes(mc.ownBytes)}` +
-          c('dim', ` own (gzip ${formatBytes(mc.ownGzipBytes)}) in ${own.length} chunk${own.length === 1 ? '' : 's'}`) +
-          (shared.length > 0 ? c('dim', ` · chunk shared with ${shared.join(', ')}`) : '') +
-          (mc.frameworkBytes > 0 ? c('dim', ` · +${formatBytes(mc.frameworkBytes)} framework (shared)`) : ''),
+        `  co-bundled with framework: ${c('bold', formatBytes(build.sharedBytes))}` +
+          c('dim', ` (gzip ${formatBytes(build.sharedGzipBytes)}) — may include your code; not attributable`),
       );
+    }
+    for (const mc of build.moduleCosts) {
+      const own = mc.chunks.filter((ch) => !ch.sharedWithFramework);
+      const peers = [...new Set(own.flatMap((ch) => ch.sharedWith))];
+      // A module with no own chunk at all is the #13 case: its code exists, but
+      // it lives inside a framework chunk, so say that instead of billing 0 B.
+      const head =
+        own.length === 0 && mc.sharedBytes > 0
+          ? `  ${c('cyan', mc.file)}  ${c('yellow', 'no chunk of its own')}` +
+            c('dim', ` — its code sits inside ${formatBytes(mc.sharedBytes)} of framework chunks, not separable`)
+          : `  ${c('cyan', mc.file)}  ${formatBytes(mc.ownBytes)}` +
+            c('dim', ` own (gzip ${formatBytes(mc.ownGzipBytes)}) in ${own.length} chunk${own.length === 1 ? '' : 's'}`) +
+            (peers.length > 0 ? c('dim', ` · chunk shared with ${peers.join(', ')}`) : '') +
+            (mc.sharedBytes > 0 ? c('dim', ` · +${formatBytes(mc.sharedBytes)} co-bundled with framework`) : '');
+      lines.push(head);
     }
     lines.push('');
   }

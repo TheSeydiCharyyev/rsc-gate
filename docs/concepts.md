@@ -47,13 +47,25 @@ attributes real bytes to each client component:
 
 ```text
 BUNDLE COST  from ./.next
-  app client JS: 664 B (gzip 400 B) — your code, framework chunks excluded
-  components/ProductList.tsx  664 B own (gzip 400 B) in 1 chunk · chunk shared with components/ui/Button.tsx
+  app client JS: 664 B (gzip 400 B) — chunks only your code is in
+  co-bundled with framework: 56.5 KB (gzip 13.5 KB) — may include your code; not attributable
+  components/ProductList.tsx  664 B own (gzip 400 B) in 1 chunk · chunk shared with components/ui/Button.tsx · +56.5 KB co-bundled with framework
 ```
 
-Chunks referenced by framework client components (anything under `node_modules`)
-are **excluded** from your numbers — you see the cost of your code, not React's.
-Shared chunks are noted so two components aren't each charged the full size.
+A chunk is **yours** when no `node_modules` client module references it. Those are
+the only bytes counted as app client JS — you see the cost of your code, not
+React's. A chunk two of your components share is counted once, not twice.
+
+A chunk that a framework module references **as well as** your code is a third
+category: **co-bundled**. The manifest lists which chunks a module needs, not
+which chunks hold its code, so when the bundler mixes your component in with
+vendor code there is no honest way to split the bytes. rsc-gate does not guess:
+those bytes are reported on their own line and left out of the app total.
+
+The case worth knowing about: a component whose *only* chunk is co-bundled has
+`0 B` of its own. It still ships. Earlier versions printed `0 B own` and left it
+there, which read as "this component is free"; the report now says
+`no chunk of its own — its code sits inside N of framework chunks, not separable`.
 
 Run with `--no-build` to skip this and get the boundary map only.
 

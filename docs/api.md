@@ -52,11 +52,30 @@ module paths (`analysis.modules.filter(m => m.directive === 'use client').map(m 
 ```ts
 interface BuildInfo {
   distDir: string;
-  appBytes: number;       // your code, framework excluded
+  appBytes: number;        // chunks only your code is in
   appGzipBytes: number;
+  sharedBytes: number;     // chunks co-bundled with the framework — not in appBytes
+  sharedGzipBytes: number;
   moduleCosts: ModuleCost[];
 }
+
+interface ModuleCost {
+  file: string;
+  ownBytes: number;        // 0 is possible — see below
+  ownGzipBytes: number;
+  sharedBytes: number;     // co-bundled with the framework, not attributable
+  sharedGzipBytes: number;
+  chunks: ChunkCost[];
+}
 ```
+
+A chunk a `node_modules` client module also references is **co-bundled**
+(`ChunkCost.sharedWithFramework`). The manifest does not say how much of it is
+yours, so its bytes are reported in `sharedBytes` and never added to `appBytes`.
+
+This means `ownBytes` can legitimately be `0` while the module still ships: the
+bundler put all of its code in a framework chunk. Check `sharedBytes` before
+telling a user a component is free.
 
 ## Rendering helpers
 

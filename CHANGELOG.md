@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (false positives — the project's #1 principle)
+
+- Bundle cost no longer reports `0 B` for a client component that ships. A chunk
+  was called "framework" — and dropped from every total — as soon as a single
+  `node_modules` module referenced it. But the manifest lists the chunks a module
+  *needs*, not the chunks that *hold its code*, so when the bundler co-bundles a
+  component with vendor code, that component's only chunk is a "framework" one
+  and it was billed at `0 B own`, `ships 0 B app JS`. Read as: this component is
+  free. It is not.
+
+  Co-bundled chunks are now their own category, next to own chunks and pure
+  framework chunks. Their bytes are reported (`sharedBytes`, and a
+  `co-bundled with framework — may include your code; not attributable` line)
+  and still kept out of `appBytes`, which stays conservative. No byte-splitting
+  heuristic was invented — the manifest cannot support one, so the report says
+  what it does not know: `no chunk of its own — its code sits inside N of
+  framework chunks, not separable`.
+
+### Changed
+
+- **Breaking (types).** `ChunkCost.framework` → `ChunkCost.sharedWithFramework`,
+  and `ModuleCost.frameworkBytes` → `ModuleCost.sharedBytes` (plus
+  `sharedGzipBytes`); `BuildInfo` gains `sharedBytes` / `sharedGzipBytes`. The
+  old names claimed a certainty the data does not have — "framework" implied the
+  chunk was *not yours*, when in truth it may be partly yours and unsplittable.
+  `appBytes` is unchanged in both meaning and value.
+
 ### Added
 
 - `fixtures/frozen-build/` — a committed snapshot of a Next build, so bundle

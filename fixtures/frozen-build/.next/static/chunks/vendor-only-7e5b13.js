@@ -1,0 +1,1 @@
+(self.webpackChunk_N_E=self.webpackChunk_N_E||[]).push([[992],{7731:(e,t,n)=>{"use strict";n.d(t,{createRouter:()=>o});let r=n(8834);function o(e){let{initialTree:t,initialCanonicalUrl:n}=e;return(0,r.useReducer)((e,t)=>t,{tree:t,canonicalUrl:n,cache:new Map,prefetchCache:new Map,pushRef:{pendingPush:!1},focusAndScrollRef:{apply:!1}})}}}]);

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzeProject } from '../src/analyze.js';
 import { parseManifestText, readBuildInfo } from '../src/buildinfo.js';
+import { renderReport } from '../src/report.js';
 
 const SAMPLE = `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};
 globalThis.__RSC_MANIFEST["/page"] = {"moduleLoading":{"prefix":""},"clientModules":{` +
@@ -71,14 +72,14 @@ describe.skipIf(!hasBuild)('readBuildInfo on a real Next 16 build', () => {
 
   it('separates framework chunks from own app chunks', () => {
     const pl = info.moduleCosts.find((m) => m.file === 'components/ProductList.tsx')!;
-    expect(pl.frameworkBytes).toBeGreaterThan(10_000); // shared framework runtime
+    expect(pl.sharedBytes).toBeGreaterThan(10_000); // shared framework runtime
     expect(pl.ownBytes).toBeGreaterThan(0);
     expect(pl.ownBytes).toBeLessThan(10_000); // our code is tiny
   });
 
   it('reports chunk sharing between project modules', () => {
     const pl = info.moduleCosts.find((m) => m.file === 'components/ProductList.tsx')!;
-    const own = pl.chunks.filter((c) => !c.framework);
+    const own = pl.chunks.filter((c) => !c.sharedWithFramework);
     expect(own.some((c) => c.sharedWith.includes('components/ui/Button.tsx'))).toBe(true);
   });
 
@@ -98,9 +99,10 @@ const frozen = fileURLToPath(new URL('../fixtures/frozen-build', import.meta.url
 // Sizes of the committed chunks. Exact on purpose: they are what proves cost is
 // attributed to the right module. (.gitattributes pins `* -text` so core.autocrlf
 // cannot make a Windows worktree disagree with Linux CI about these numbers.)
-const FRAMEWORK_BYTES = 741;
+const FRAMEWORK_BYTES = 741; // co-bundled: layout-router + Card + Badge + ProductCard + Inline
 const SHARED_BYTES = 345; // Card + Badge
 const PRODUCT_BYTES = 211; // ProductCard, reached only via the [id] route
+const VENDOR_ONLY_BYTES = 343; // referenced by layout-router alone — never ours
 
 describe('readBuildInfo on the frozen build snapshot (#14)', () => {
   const analysis = analyzeProject(frozen);
@@ -116,16 +118,14 @@ describe('readBuildInfo on the frozen build snapshot (#14)', () => {
   it('matches every project client module through the analyzer, by path suffix', () => {
     // The manifest says "[project]/fixtures/frozen-build/components/Card.tsx";
     // the analyzer says "components/Card.tsx". The suffix match is the join.
-    expect(clientFiles.sort()).toEqual([
+    const expected = [
       'components/Badge.tsx',
       'components/Card.tsx',
+      'components/Inline.tsx',
       'components/ProductCard.tsx',
-    ]);
-    expect(info.moduleCosts.map((m) => m.file).sort()).toEqual([
-      'components/Badge.tsx',
-      'components/Card.tsx',
-      'components/ProductCard.tsx',
-    ]);
+    ];
+    expect(clientFiles.sort()).toEqual(expected);
+    expect(info.moduleCosts.map((m) => m.file).sort()).toEqual(expected);
   });
 
   it('never bills a node_modules module to the project', () => {
@@ -133,17 +133,17 @@ describe('readBuildInfo on the frozen build snapshot (#14)', () => {
     expect(info.moduleCosts.some((m) => m.file.includes('layout-router'))).toBe(false);
   });
 
-  it('splits framework chunks from own chunks', () => {
+  it('splits co-bundled chunks from own chunks', () => {
     const card = cost('components/Card.tsx');
     expect(card.ownBytes).toBe(SHARED_BYTES);
-    expect(card.frameworkBytes).toBe(FRAMEWORK_BYTES);
+    expect(card.sharedBytes).toBe(FRAMEWORK_BYTES);
 
     const framework = card.chunks.find((c) => c.url.includes('framework-'))!;
-    expect(framework.framework).toBe(true);
+    expect(framework.sharedWithFramework).toBe(true);
     expect(framework.bytes).toBe(FRAMEWORK_BYTES);
 
     const own = card.chunks.find((c) => c.url.includes('app-shared-'))!;
-    expect(own.framework).toBe(false);
+    expect(own.sharedWithFramework).toBe(false);
     expect(own.bytes).toBe(SHARED_BYTES);
   });
 
@@ -168,6 +168,20 @@ describe('readBuildInfo on the frozen build snapshot (#14)', () => {
     expect(info.appGzipBytes).toBeLessThan(info.appBytes);
   });
 
+  it('never charges the app for a chunk only the framework uses', () => {
+    // vendor-only-7e5b13.js (343 B) is referenced by layout-router and nobody
+    // else. It is not co-bundled with us — it belongs in no total, no module.
+    const urls = info.moduleCosts.flatMap((m) => m.chunks.map((c) => c.url));
+    expect(urls.some((u) => u.includes('vendor-only-'))).toBe(false);
+    expect(existsSync(join(frozen, '.next', 'static', 'chunks', 'vendor-only-7e5b13.js'))).toBe(true);
+    expect(statSync(join(frozen, '.next', 'static', 'chunks', 'vendor-only-7e5b13.js')).size).toBe(
+      VENDOR_ONLY_BYTES,
+    );
+    // Neither total absorbs it: 556 stays 556, and shared is 741, not 1084.
+    expect(info.appBytes).toBe(SHARED_BYTES + PRODUCT_BYTES);
+    expect(info.sharedBytes).toBe(FRAMEWORK_BYTES);
+  });
+
   it('gives a dynamic [id] route a non-zero cost (FP #8 stays fixed)', () => {
     const product = cost('components/ProductCard.tsx');
     expect(product.ownBytes).toBe(PRODUCT_BYTES);
@@ -182,5 +196,59 @@ describe('readBuildInfo on the frozen build snapshot (#14)', () => {
     expect(parseManifestText(manifest).some((e) => e.modulePath.endsWith('components/ProductCard.tsx'))).toBe(
       true,
     );
+  });
+
+  // #13: Inline.tsx was co-bundled into the framework chunk, so it has no chunk
+  // of its own. It still ships. Reporting 0 B and nothing else is the lie.
+  it('does not pretend a co-bundled module is free', () => {
+    const inline = cost('components/Inline.tsx');
+    expect(inline.chunks).toHaveLength(1);
+    expect(inline.chunks[0].sharedWithFramework).toBe(true);
+    expect(inline.ownBytes).toBe(0); // honest: we cannot size its code…
+    expect(inline.sharedBytes).toBe(FRAMEWORK_BYTES); // …but we must not imply zero
+  });
+
+  it('says so in the report instead of printing "0 B"', () => {
+    const text = renderReport({ ...analysis, root: frozen }, { color: false, version: '0.0.0', build: info });
+    expect(text).toContain('co-bundled with framework');
+    expect(text).toMatch(/Inline\.tsx\s+no chunk of its own/);
+    // The boundary line must not claim it ships nothing.
+    expect(text).not.toMatch(/Inline\.tsx.*ships 0 B/);
+    expect(text).not.toMatch(/Inline\.tsx\s+0 B own/);
+  });
+
+  it('keeps co-bundled bytes out of the app total but still reports them', () => {
+    expect(info.appBytes).toBe(SHARED_BYTES + PRODUCT_BYTES); // Inline adds nothing…
+    expect(info.sharedBytes).toBe(FRAMEWORK_BYTES); // …but the bytes are not hidden
+    expect(info.sharedGzipBytes).toBeGreaterThan(0);
+    expect(info.sharedGzipBytes).toBeLessThan(info.sharedBytes);
+  });
+});
+
+// #13, in isolation: a project module whose ONLY chunk is one a node_modules
+// module also references. The old code flagged that chunk "framework", filtered
+// it out, and reported ownBytes = 0 — "0 B app client JS" for code that ships.
+const COBUNDLED_SAMPLE = `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};
+globalThis.__RSC_MANIFEST["/page"] = {"clientModules":{` +
+  `"[project]/app/node_modules/next/dist/esm/client/components/layout-router.js":{"id":1,"name":"*","chunks":["/_next/static/chunks/vendor.js"],"async":false},` +
+  `"[project]/app/components/CoBundled.tsx":{"id":2,"name":"*","chunks":["/_next/static/chunks/vendor.js"],"async":false},` +
+  `"[project]/app/components/Standalone.tsx":{"id":3,"name":"*","chunks":["/_next/static/chunks/own.js"],"async":false}}};`;
+
+describe('co-bundled chunks are a category of their own (#13)', () => {
+  const entries = parseManifestText(COBUNDLED_SAMPLE);
+  const byPath = (needle: string) => entries.find((e) => e.modulePath.endsWith(needle))!;
+
+  it('sees the vendor chunk in both the framework and the project module', () => {
+    expect(byPath('layout-router.js').fromNodeModules).toBe(true);
+    expect(byPath('layout-router.js').chunks).toEqual(['/_next/static/chunks/vendor.js']);
+
+    const co = byPath('components/CoBundled.tsx');
+    expect(co.fromNodeModules).toBe(false);
+    // Its only chunk is the vendor one — there is nowhere else its code can be.
+    expect(co.chunks).toEqual(['/_next/static/chunks/vendor.js']);
+  });
+
+  it('leaves a chunk no framework module touches as plainly ours', () => {
+    expect(byPath('components/Standalone.tsx').chunks).toEqual(['/_next/static/chunks/own.js']);
   });
 });
