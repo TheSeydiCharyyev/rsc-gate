@@ -1,14 +1,23 @@
 import dynamic from 'next/dynamic';
+import { lazy } from 'react';
 
 // Reached ONLY through next/dynamic — the lazy client subtree must still be
-// part of the graph (FP #7: these edges used to vanish).
+// part of the graph (FP #7: these edges used to vanish). Its props cross the
+// boundary exactly like a statically imported component's, and used to go
+// unchecked: the tag arrives as a local variable, not an import binding.
 const Chart = dynamic(() => import('../components/Chart'));
 
-// Non-literal specifier: not statically knowable, must NOT crash or resolve.
+// React.lazy is the same boundary.
+const Panel = lazy(() => import('../components/Panel'));
+
+// A SERVER component, lazily loaded: no boundary, so its props must not be
+// flagged even though one of them is a function.
+const ServerBox = dynamic(() => import('../components/ServerBox'));
+
+// Non-literal specifier: not statically knowable, must NOT crash or resolve —
+// and must not become a client tag either.
 declare const someModule: string;
-export async function loadSomething() {
-  return import(someModule);
-}
+const Unknowable = dynamic(() => import(someModule));
 
 // Bundler-ignored: webpack/turbopack leave this expression as-is and ship
 // nothing — no edge, even though the file exists and would "leak".
@@ -21,5 +30,12 @@ export async function loadNative() {
 export type UtilNs = typeof import('../components/TypesOnly');
 
 export default function Page() {
-  return <Chart />;
+  return (
+    <main>
+      <Chart onSelect={() => {}} thing={new WeakMap()} />
+      <Panel onClose={() => {}} />
+      <ServerBox render={() => 'ok'} />
+      <Unknowable whatever={() => {}} />
+    </main>
+  );
 }

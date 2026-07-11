@@ -147,7 +147,19 @@ export function analyzeProps(
     const clientTags = new Map<string, string>();
     // locals imported from "use server" modules are server actions — legal props
     const actionLocals = new Set<string>();
+    // locals bound to next/dynamic and React.lazy — the lazy-component factories
+    const lazyFactories = new Set<string>();
+    const reactNamespaces = new Set<string>();
     for (const imp of node.parsed.imports) {
+      if (imp.specifier === 'next/dynamic') {
+        for (const b of imp.bindings) if (b.imported === 'default') lazyFactories.add(b.local);
+      }
+      if (imp.specifier === 'react') {
+        for (const b of imp.bindings) {
+          if (b.imported === 'lazy') lazyFactories.add(b.local);
+          if (b.imported === 'default') reactNamespaces.add(b.local); // React.lazy(…)
+        }
+      }
       const target = resolver.resolve(file, imp.specifier);
       if (!target) continue;
       for (const b of imp.bindings) {
@@ -158,9 +170,64 @@ export function analyzeProps(
         if (originNode?.parsed.directive === 'use server') actionLocals.add(b.local);
       }
     }
-    if (clientTags.size === 0) continue;
 
     const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+
+    // `const Chart = dynamic(() => import('./Chart'))` is a client component used as
+    // a JSX tag, but it arrives as a local variable, not an import binding — so it
+    // was absent from clientTags and its props were never checked at all. The tag is
+    // only registered when the lazily loaded module really is "use client": a server
+    // component loaded this way crosses no boundary, and flagging its props would be
+    // a false positive.
+    const lazyTagOrigin = (init: ts.Expression): string | null => {
+      if (!ts.isCallExpression(init) || init.arguments.length === 0) return null;
+      const callee = init.expression;
+      const isLazyFactory = ts.isIdentifier(callee)
+        ? lazyFactories.has(callee.text)
+        : ts.isPropertyAccessExpression(callee) &&
+          ts.isIdentifier(callee.expression) &&
+          reactNamespaces.has(callee.expression.text) &&
+          callee.name.text === 'lazy';
+      if (!isLazyFactory) return null;
+
+      // The loader is `() => import('…')`, sometimes `.then(m => m.Chart)`. Take the
+      // first literal import inside it; a computed specifier is not knowable.
+      let specifier: string | null = null;
+      const findImport = (n: ts.Node): void => {
+        if (
+          specifier === null &&
+          ts.isCallExpression(n) &&
+          n.expression.kind === ts.SyntaxKind.ImportKeyword &&
+          n.arguments.length > 0 &&
+          ts.isStringLiteralLike(n.arguments[0])
+        ) {
+          specifier = n.arguments[0].text;
+          return;
+        }
+        ts.forEachChild(n, findImport);
+      };
+      findImport(init.arguments[0]);
+      if (specifier === null) return null;
+
+      const target = resolver.resolve(file, specifier);
+      if (!target) return null;
+      // dynamic()/lazy() render the module's default export.
+      const origin = resolveExportOrigin(nodes, resolver, target, 'default') ?? target;
+      return nodes.get(origin)?.parsed.directive === 'use client' ? origin : null;
+    };
+
+    if (lazyFactories.size > 0 || reactNamespaces.size > 0) {
+      const collectLazy = (n: ts.Node): void => {
+        if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+          const origin = lazyTagOrigin(n.initializer);
+          if (origin) clientTags.set(n.name.text, origin);
+        }
+        ts.forEachChild(n, collectLazy);
+      };
+      collectLazy(sf);
+    }
+
+    if (clientTags.size === 0) continue;
 
     // Top-level local functions — passing one as a prop is the same hazard as an inline
     // arrow, EXCEPT a function whose body opens with "use server" is a Server Action and

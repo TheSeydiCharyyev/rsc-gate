@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (false negatives)
+
+- Props of a lazily loaded client component are now checked. `const Chart =
+  dynamic(() => import('./Chart'))` arrives as a *local variable*, not an import
+  binding, and the set of known client tags was built from import bindings alone —
+  so `<Chart onSelect={fn} />` was not recognized as crossing a boundary and its
+  props were never looked at. The hazard was invisible to the report and to
+  `--strict`: a project whose only unserializable prop sat on a lazy component
+  passed the gate green. `React.lazy` is the same boundary and is handled too.
+
+  Registering the tag requires the lazily loaded module to actually be
+  `"use client"`. A *server* component loaded through `dynamic()` crosses no
+  boundary, so its props are still not flagged — a lazy import is not a boundary
+  by itself, and saying otherwise would be a false positive. A non-literal
+  `import(someVar)` does not become a tag either.
+
 ### Fixed (false positives — the project's #1 principle)
 
 - `jsconfig.json` is now read. A JavaScript Next project declares its aliases

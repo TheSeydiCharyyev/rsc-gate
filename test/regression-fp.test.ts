@@ -120,7 +120,41 @@ describe('#7 — next/dynamic and import() edges are part of the graph', () => {
   it('non-literal, webpackIgnore and typeof import() positions create no edges', () => {
     // TypesOnly.ts and Ignored.tsx exist on disk — a wrongly-created edge would
     // pull them into the module list (and Ignored would fake a leak).
-    expect(a.modules.map((m) => m.file).sort()).toEqual(['app/page.tsx', 'components/Chart.tsx']);
+    expect(a.modules.map((m) => m.file).sort()).toEqual([
+      'app/page.tsx',
+      'components/Chart.tsx',
+      'components/Panel.tsx',
+      'components/ServerBox.tsx',
+    ]);
+    expect(a.modules.some((m) => m.file.includes('Ignored') || m.file.includes('TypesOnly'))).toBe(false);
+  });
+});
+
+describe('props of a lazily loaded client component are checked', () => {
+  const a = fx('dynamic-import');
+  const propsOf = (component: string) =>
+    a.propFindings.filter((f) => f.component === component).map((f) => `${f.prop}:${f.kind}`);
+
+  it('next/dynamic — the tag is a local variable, not an import binding', () => {
+    // clientTags was built from import bindings alone, so <Chart> was not a known
+    // client tag and its props were never looked at: a hazard the gate never saw.
+    expect(propsOf('Chart').sort()).toEqual(['onSelect:function', 'thing:class-instance']);
+  });
+
+  it('React.lazy is the same boundary', () => {
+    expect(propsOf('Panel')).toEqual(['onClose:function']);
+  });
+
+  it('a lazily loaded SERVER component is not a boundary — its props are not flagged', () => {
+    // ServerBox takes a function prop, but no "use client" means nothing crosses.
+    // Flagging it would be a false positive, which is the one thing we do not do.
+    expect(propsOf('ServerBox')).toEqual([]);
+    expect(a.propsCrossings.map((c) => c.component)).not.toContain('ServerBox');
+  });
+
+  it('a component from a non-literal import() is not treated as a client tag', () => {
+    expect(propsOf('Unknowable')).toEqual([]);
+    expect(a.propsCrossings.map((c) => c.component)).not.toContain('Unknowable');
   });
 });
 
