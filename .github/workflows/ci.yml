@@ -52,8 +52,11 @@ jobs:
           set -u
           fail=0
           expect() {
-            node dist/cli.js "fixtures/$1" --strict > /dev/null 2>&1
-            got=$?
+            # `shell: bash` runs with -e, so a bare failing command would abort the
+            # script — and a --strict run is *meant* to exit 2. Capture the code
+            # with `|| got=$?`, which -e leaves alone.
+            got=0
+            node dist/cli.js "fixtures/$1" --strict > /dev/null 2>&1 || got=$?
             if [ "$got" != "$2" ]; then
               echo "FAIL  fixtures/$1: expected exit $2, got $got"
               fail=1
