@@ -50,6 +50,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- `"server-only"` aliased to a local shim is no longer reported as a leak. The
+  check matched the raw specifier, before resolution — so a project that maps
+  `"server-only": ["./lib/shim"]` in tsconfig `paths` (a real pattern, e.g. to keep
+  a test runner from blowing up on the real package) was told its import "will
+  throw at build/runtime" when it resolves to a harmless local module and throws
+  nothing. The report contradicted its own module list, which showed the shim as an
+  ordinary module — and `--strict` failed a healthy build. The specifier now has to
+  still resolve to the package, not to a file in the project.
+
 - `jsconfig.json` is now read. A JavaScript Next project declares its aliases
   there, not in `tsconfig.json` — and rsc-gate looked only at `tsconfig.json`, so
   every alias in such a project was dropped, the import graph collapsed to the

@@ -271,7 +271,12 @@ export function analyzeProject(projectRoot: string): Analysis {
   for (const [f, n] of nodes) {
     if (!n.envs.has('client')) continue;
     for (const imp of n.parsed.imports) {
-      if (SERVER_ONLY_PACKAGES.has(imp.specifier)) {
+      // The specifier has to still BE the package. A project may alias
+      // "server-only" to a local shim in tsconfig `paths` — the resolver follows
+      // that, the graph shows the shim as an ordinary module, and nothing throws
+      // at build. Matching the raw specifier flagged it anyway, so the report
+      // contradicted its own module list and failed a healthy build.
+      if (SERVER_ONLY_PACKAGES.has(imp.specifier) && resolver.resolve(f, imp.specifier) === null) {
         serverOnlyViolations.push({
           clientFile: rel(f),
           imports: imp.specifier,
