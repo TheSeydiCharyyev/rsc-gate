@@ -121,6 +121,19 @@ A leak fails `--strict` (exit `2`). The message says the import will throw at
 build or runtime, so a gate that reported it and still exited `0` would be
 announcing a fire and holding the door open. Until `0.2.0` it did exactly that.
 
+**Unreached modules get a note, not a verdict.** A `"use client"` file that imports
+`server-only` but that no entry reaches is *not* flagged: a directive alone ships
+nothing, so calling it a leak would be a false positive. But it is not nothing
+either, because there are two ways to end up there — the file is dead code, or the
+import graph is missing an edge and the leak is real but unseen. It is reported
+under `NOTES`, and `--strict` ignores it:
+
+```text
+NOTES  not failures — nothing here fails --strict
+  components/Orphan.tsx
+      "use client" module imports "server-only" but no entry reaches it — dead code, or an import edge we cannot see
+```
+
 Leak detection is only as good as the import graph: a client module the graph
 cannot reach is a module whose leaks are invisible. That is why edges the
 analyzer cannot see are treated as bugs, not as acceptable gaps.

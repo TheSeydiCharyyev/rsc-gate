@@ -79,7 +79,10 @@ export function renderReport(a: Analysis, opts: RenderOptions): string {
         : cost.sharedBytes > 0
           ? `  ${c('yellow', 'co-bundled with framework')}`
           : '';
-    lines.push(`  ${from} ${c('cyan', '→ ' + to)}  ${c('dim', `imports: ${b.names.join(', ')}`)}${costNote}`);
+    const lazyNote = b.lazy ? c('dim', ' [lazy]') : '';
+    lines.push(
+      `  ${from} ${c('cyan', '→ ' + to)}${lazyNote}  ${c('dim', `imports: ${b.names.join(', ')}`)}${costNote}`,
+    );
   }
   if (!build) lines.push(c('dim', '  (run `next build` to see per-boundary bundle cost)'));
   lines.push('');
@@ -93,7 +96,11 @@ export function renderReport(a: Analysis, opts: RenderOptions): string {
       const pretty = m.clientChain
         .map((f, i) => {
           const mod = a.modules.find((x) => x.file === f);
-          return mod?.directive === 'use client' && i !== last ? `${f} ("use client")` : f;
+          // A lazy step is why-chain information, not decoration: the subtree is
+          // code-split, so it ships on demand rather than with the first load.
+          const lazy = m.clientChainLazy?.[i] ? ' [lazy]' : '';
+          const client = mod?.directive === 'use client' && i !== last ? ' ("use client")' : '';
+          return `${f}${client}${lazy}`;
         })
         .join('\n      → ');
       lines.push(c('dim', `      ${pretty}`));
@@ -129,6 +136,15 @@ export function renderReport(a: Analysis, opts: RenderOptions): string {
     for (const v of a.serverOnlyViolations) {
       lines.push(`  ${c('red', v.clientFile)}  ${c('dim', `imports "${v.imports}"`)}`);
       lines.push(c('dim', `      ${v.message}`));
+    }
+    lines.push('');
+  }
+
+  if (a.notes.length > 0) {
+    lines.push(c('bold', 'NOTES') + c('dim', '  not failures — nothing here fails --strict'));
+    for (const n of a.notes) {
+      lines.push(`  ${c('yellow', n.file)}`);
+      lines.push(c('dim', `      ${n.message}`));
     }
     lines.push('');
   }

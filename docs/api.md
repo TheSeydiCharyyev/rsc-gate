@@ -36,7 +36,8 @@ interface Analysis {
   root: string;                     // absolute, however you spelled it
   appDir: string;
   entries: string[];
-  modules: ModuleReport[];          // file, directive, envs, clientChain?, pureReexport?, opaqueExports?
+  notes: AnalysisNote[];            // info only — never gate a build on these
+  modules: ModuleReport[];          // file, directive, envs, clientChain?, clientChainLazy?, pureReexport?, opaqueExports?
   boundaries: Boundary[];           // chain, names
   propsCrossings: PropsCrossing[];  // every client-component JSX usage in server code
   propFindings: PropFinding[];      // the non-ok props

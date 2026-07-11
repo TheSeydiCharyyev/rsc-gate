@@ -88,6 +88,10 @@ export function renderHtml(a: Analysis, build: BuildInfo | null, version: string
     .map((v) => `<div class="card"><b class="bad">${esc(v.clientFile)}</b> <span class="dim">imports "${esc(v.imports)}"</span><div class="chain">${esc(v.message)}</div></div>`)
     .join('');
 
+  const noteCards = a.notes
+    .map((n) => `<div class="card"><b>${esc(n.file)}</b><div class="chain">${esc(n.message)}</div></div>`)
+    .join('');
+
   const costRows = build
     ? build.moduleCosts
         .map((mc) => {
@@ -133,6 +137,8 @@ ${bundledCards || '<div class="dim">none</div>'}
 <table><thead><tr><th>component</th><th>prop</th><th>verdict</th></tr></thead><tbody>${propRows || '<tr><td class="dim" colspan="3">none</td></tr>'}</tbody></table>
 
 ${a.serverOnlyViolations.length ? `<h2>Server-only leaks</h2>${leakCards}` : ''}
+
+${a.notes.length ? `<h2>Notes</h2><p class="dim">Not failures — nothing here fails <code>--strict</code>.</p>${noteCards}` : ''}
 
 ${build ? `<h2>Bundle cost</h2><p class="dim"><b>own</b> — chunks only your code is in. <b>co-bundled</b> — chunks the framework is in too: they may carry your code, and the manifest cannot say how much, so they are never billed to the app total.</p><table><thead><tr><th>module</th><th>own</th><th>gzip</th><th>co-bundled</th><th>shared with</th></tr></thead><tbody>${costRows}</tbody></table>` : ''}
 

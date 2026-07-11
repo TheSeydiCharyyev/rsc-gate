@@ -34,8 +34,18 @@ describe('bare specifiers under an explicit baseUrl', () => {
     // ts.resolveModuleName — so Ghost must stay out of the graph, leak and all.
     expect(files).not.toContain('dead/Ghost.tsx');
     expect(a.serverOnlyViolations.map((v) => v.clientFile)).not.toContain('dead/Ghost.tsx');
-    expect(JSON.stringify(a)).not.toContain('Ghost');
     expect(createResolver(root).resolve(`${root}/app/page.tsx`, 'dead/Ghost')).toBeNull();
+    // Nothing but a note may mention it: if an edge were ever invented, Ghost would
+    // surface as a module, a boundary or a leak, and this catches that.
+    expect(JSON.stringify({ ...a, notes: [] })).not.toContain('Ghost');
+  });
+
+  it('does mention it as a note — unreached, so not a leak, but worth knowing', () => {
+    // Ghost is "use client" and imports server-only, and nothing reaches it. That
+    // is not a failure (a directive alone ships nothing), but the reason matters:
+    // dead code, or an edge the resolver cannot see. Here it is dead on purpose.
+    const note = a.notes.find((n) => n.file === 'dead/Ghost.tsx');
+    expect(note?.kind).toBe('unreached-server-only');
   });
 });
 

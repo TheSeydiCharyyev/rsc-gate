@@ -12,6 +12,8 @@ export interface ModuleReport {
   envs: Env[];
   /** For client-bundled modules (no directive): shortest import chain from an entry. */
   clientChain?: string[];
+  /** Per step of `clientChain`: was the edge into it lazy (import()/next/dynamic)? */
+  clientChainLazy?: boolean[];
   /** Pure re-export barrel: no own code, ~0 bundle weight. */
   pureReexport?: boolean;
   /**
@@ -28,6 +30,8 @@ export interface Boundary {
   chain: string[];
   /** Names imported across the boundary ('*' = namespace/side-effect). */
   names: string[];
+  /** Reached through import()/next/dynamic — code-split, so not in the first load. */
+  lazy?: boolean;
 }
 
 export interface Analysis {
@@ -42,6 +46,14 @@ export interface Analysis {
   propFindings: PropFinding[];
   /** Server-only code reachable from the client bundle. */
   serverOnlyViolations: ServerOnlyViolation[];
+  /** Things worth knowing that are not failures. Never gate a build on these. */
+  notes: AnalysisNote[];
+}
+
+export interface AnalysisNote {
+  kind: 'unreached-server-only';
+  file: string;
+  message: string;
 }
 
 export interface ServerOnlyViolation {
@@ -99,6 +111,7 @@ interface Node {
   parsed: ParsedModule;
   envs: Set<Env>;
   clientChain?: string[];
+  clientChainLazy?: boolean[];
   /** Re-export names already followed per env ('*' = all). */
   followed: Map<Env, Set<string> | '*'>;
 }
@@ -107,6 +120,8 @@ interface WorkItem {
   file: string;
   env: Env;
   chain: string[];
+  /** Per step of `chain`: was the edge *into* it lazy (import()/next/dynamic)? */
+  lazy: boolean[];
   /** Which exports of this module the importer asked for. '*' = everything. */
   names: Set<string> | '*';
 }
@@ -161,13 +176,15 @@ export function analyzeProject(projectRoot: string): Analysis {
     file: f,
     env: nodes.get(f)?.parsed.directive === 'use client' ? 'client' : 'server',
     chain: [f],
+    lazy: [false],
     names: '*' as const,
   }));
 
-  const push = (from: WorkItem, target: string, names: Set<string> | '*') => {
+  const push = (from: WorkItem, target: string, names: Set<string> | '*', lazy = false) => {
     const node = nodes.get(target);
     if (!node) return;
     let env = from.env;
+    const lazyChain = [...from.lazy, lazy];
     if (node.parsed.directive === 'use client' && from.env === 'server') {
       env = 'client';
       const chain = [...from.chain, target].map(rel);
@@ -175,10 +192,12 @@ export function analyzeProject(projectRoot: string): Analysis {
       const key = chain.join('>') + '|' + nameList.join(',');
       if (!boundaryKeys.has(key)) {
         boundaryKeys.add(key);
-        boundaries.push({ chain, names: nameList });
+        // Lazy anywhere along the chain: the subtree is code-split, so it does not
+        // ship with the first paint. The cost is real, just deferred — worth saying.
+        boundaries.push({ chain, names: nameList, ...(lazyChain.some(Boolean) ? { lazy: true } : {}) });
       }
     }
-    queue.push({ file: target, env, chain: [...from.chain, target], names });
+    queue.push({ file: target, env, chain: [...from.chain, target], lazy: lazyChain, names });
   };
 
   // Walk with a read cursor rather than shift(): shifting re-indexes the whole
@@ -195,12 +214,13 @@ export function analyzeProject(projectRoot: string): Analysis {
       node.envs.add(item.env);
       if (item.env === 'client' && !node.parsed.directive && !node.clientChain) {
         node.clientChain = item.chain.map(rel);
+        node.clientChainLazy = item.lazy;
       }
       for (const imp of node.parsed.imports) {
         const target = resolver.resolve(item.file, imp.specifier);
         if (!target) continue;
         const names: Set<string> | '*' = imp.namespace || imp.sideEffectOnly ? '*' : imp.names;
-        push(item, target, names);
+        push(item, target, names, imp.dynamic === true);
       }
     }
 
@@ -255,6 +275,7 @@ export function analyzeProject(projectRoot: string): Analysis {
       directive: n.parsed.directive,
       envs: [...n.envs].sort() as Env[],
       ...(n.clientChain ? { clientChain: n.clientChain } : {}),
+      ...(n.clientChainLazy?.some(Boolean) ? { clientChainLazy: n.clientChainLazy } : {}),
       ...(n.parsed.imports.length === 0 && n.parsed.localExportNames.size === 0 && n.parsed.reexports.length > 0
         ? { pureReexport: true }
         : {}),
@@ -292,6 +313,26 @@ export function analyzeProject(projectRoot: string): Analysis {
   }
   serverOnlyViolations.sort((a, b) => a.clientFile.localeCompare(b.clientFile));
 
+  // A "use client" file that imports server-only but no entry reaches: not a leak
+  // (a directive alone ships nothing — FP #12), so failing on it would be a false
+  // positive. But total silence throws away a real signal, because there are two
+  // ways to get here: the file is dead code, or the graph is missing an edge and
+  // the leak is real but unseen. Say so, at info level, and gate nothing on it.
+  const notes: AnalysisNote[] = [];
+  for (const [f, n] of nodes) {
+    if (n.envs.has('client') || n.parsed.directive !== 'use client') continue;
+    for (const imp of n.parsed.imports) {
+      if (!SERVER_ONLY_PACKAGES.has(imp.specifier)) continue;
+      if (resolver.resolve(f, imp.specifier) !== null) continue; // aliased to a shim
+      notes.push({
+        kind: 'unreached-server-only',
+        file: rel(f),
+        message: `"use client" module imports "${imp.specifier}" but no entry reaches it — dead code, or an import edge we cannot see`,
+      });
+    }
+  }
+  notes.sort((a, b) => a.file.localeCompare(b.file));
+
   return {
     root,
     appDir: rel(appDir),
@@ -301,5 +342,6 @@ export function analyzeProject(projectRoot: string): Analysis {
     propsCrossings: crossings,
     propFindings: findings,
     serverOnlyViolations,
+    notes,
   };
 }

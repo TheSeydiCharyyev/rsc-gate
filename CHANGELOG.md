@@ -94,6 +94,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exist, as it does for Next and tsc: the project is a TypeScript one and
   `jsconfig` is ignored.
 
+### Added
+
+- Lazy edges are visible. A boundary reached through `import()`, `next/dynamic` or
+  `React.lazy` is marked `[lazy]`, in the boundary list and in why-chains
+  (`Boundary.lazy`, `ModuleReport.clientChainLazy`). The flag was recorded and
+  never read, so a code-split subtree looked exactly like one that ships with the
+  first paint. The cost is real either way — it is just deferred, and now the
+  report says which.
+
+- A `"use client"` module that imports `server-only` but that no entry reaches now
+  gets a **note**. It is not a leak — a directive alone ships nothing, and failing
+  on it would be the false positive that was fixed in 0.2.0 — but silence threw a
+  real signal away, because there are two ways to end up here: the module is dead
+  code, or the graph is missing an edge and the leak is real but unseen. Given how
+  many missing edges this release found, that second reading is worth surfacing.
+  Notes appear under `NOTES`, are exposed as `Analysis.notes`, and gate nothing:
+  `--strict` ignores them entirely.
+
 ### Changed
 
 - The graph walk uses a read cursor instead of `Array.shift()`, which re-indexes
