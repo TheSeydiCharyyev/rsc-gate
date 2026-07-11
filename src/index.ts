@@ -6,6 +6,8 @@ export { readBuildInfo, parseManifestText } from './buildinfo.js';
 export type { PropFinding, PropsCrossing, PropVerdict } from './props.js';
 export type { BuildInfo, ModuleCost, ChunkCost, ManifestModule } from './buildinfo.js';
 export { renderReport, renderExplanation, renderExplanationList, formatBytes } from './report.js';
+export { strictGate } from './gate.js';
+export type { GateResult } from './gate.js';
 export { EXPLANATIONS, findExplanation } from './explain.js';
 export type { Explanation } from './explain.js';
 export { renderHtml } from './html.js';

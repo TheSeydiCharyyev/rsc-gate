@@ -44,7 +44,7 @@ Flags:
 
 | Flag | Effect |
 |------|--------|
-| `--strict` | exit code `2` when a serialization hazard is found — for CI |
+| `--strict` | exit code `2` when a serialization hazard **or** a server-only leak is found — for CI |
 | `--explain <code>` | print a fix guide for a known RSC error |
 | `--html [path]` | write a self-contained HTML report (default `rsc-gate-report.html`) |
 | `--json` | machine-readable output |
@@ -83,7 +83,12 @@ Fail a pull request when someone crosses the boundary the wrong way:
 - run: npx rsc-gate --strict
 ```
 
-`--strict` exits `2` when a serialization hazard is found, `0` otherwise.
+`--strict` exits `2` when a serialization hazard **or** a server-only leak is
+found, `0` otherwise. Both are things that break at build or runtime — a gate
+that let leaks through would be reporting a fire and opening the door.
+
+Spread props (`{...props}`) are the one thing it will not fail on: they cannot be
+checked statically, and failing a build on "cannot verify" is a false positive.
 
 ## Documentation
 

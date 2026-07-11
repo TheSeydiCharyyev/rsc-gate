@@ -8,6 +8,7 @@ import { readBuildInfo } from './buildinfo.js';
 import { renderReport, renderExplanation, renderExplanationList } from './report.js';
 import { renderHtml } from './html.js';
 import { findExplanation } from './explain.js';
+import { strictGate } from './gate.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -33,7 +34,7 @@ if (opts.help) {
       '  --json           machine-readable output',
       '  --no-color       plain text',
       '  --no-build       skip reading .next/ bundle-cost data',
-      '  --strict         exit 2 when serialization hazards are found (CI gate)',
+      '  --strict         exit 2 on serialization hazards or server-only leaks (CI gate)',
       '  --html [path]    write a self-contained HTML report (default: rsc-gate-report.html)',
       '                   the path must end in .html/.htm, or be given as --html=<path>',
       '  --explain <code> show a fix guide for a known RSC error',
@@ -77,7 +78,7 @@ try {
   } else {
     console.log(renderReport(analysis, { color, version, build }));
   }
-  if (opts.strict && analysis.propFindings.some((f) => f.kind !== 'spread')) {
+  if (opts.strict && strictGate(analysis).failed) {
     process.exit(2);
   }
 } catch (err) {

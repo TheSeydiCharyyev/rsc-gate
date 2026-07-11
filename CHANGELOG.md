@@ -56,6 +56,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`--strict` now fails on server-only leaks, not just serialization hazards.**
+  This changes exit codes for existing users, deliberately. The gate exited `0`
+  on a leak whose own message reads *"the import will throw at build/runtime"* —
+  it announced the fire and held the door open. Of the fixtures in this repo that
+  contain a real leak, eight of nine passed `--strict` green; the ninth only
+  failed because it *also* had a serialization hazard. A tool that sells itself
+  as a CI gate for boundary bugs cannot ship a CI gate that ignores them.
+
+  What it does not do is fail on things it cannot verify: spread props
+  (`{...props}`) are still excluded, because failing a build on "cannot check
+  this statically" is a false positive, and those are the one thing this project
+  refuses to emit. The rule lives in `strictGate()`, now exported, so a consumer
+  can apply exactly the gate the CLI applies.
+
 - **Breaking (types).** `ChunkCost.framework` → `ChunkCost.sharedWithFramework`,
   and `ModuleCost.frameworkBytes` → `ModuleCost.sharedBytes` (plus
   `sharedGzipBytes`); `BuildInfo` gains `sharedBytes` / `sharedGzipBytes`. The

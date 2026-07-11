@@ -42,3 +42,14 @@ jobs:
           if node dist/cli.js fixtures/demo --strict > /dev/null 2>&1; then
             echo "expected exit 2 on hazardous fixture" && exit 1
           fi
+
+      - name: Strict gate catches a server-only leak
+        shell: bash
+        run: |
+          if node dist/cli.js fixtures/orphan-leak --strict > /dev/null 2>&1; then
+            echo "expected exit 2 on a server-only leak" && exit 1
+          fi
+
+      - name: Strict gate stays quiet on a clean project
+        shell: bash
+        run: node dist/cli.js fixtures/edge --strict > /dev/null

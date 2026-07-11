@@ -87,7 +87,8 @@ imported from a `"use server"` module, is recognized as a legal prop and not
 flagged.
 
 `--strict` exits with code `2` when any non-spread hazard is found, so CI can
-fail the build before prerender does.
+fail the build before prerender does. It also fails on server-only leaks — see
+below.
 
 ## Server-only leaks
 
@@ -102,6 +103,10 @@ SERVER-ONLY LEAKS  server-only code reachable from the client bundle
 This detector is intentionally conservative — importing a `"use server"` module
 into a client component is the normal Server-Action pattern and is **not**
 flagged.
+
+A leak fails `--strict` (exit `2`). The message says the import will throw at
+build or runtime, so a gate that reported it and still exited `0` would be
+announcing a fire and holding the door open. Until `0.2.0` it did exactly that.
 
 Leak detection is only as good as the import graph: a client module the graph
 cannot reach is a module whose leaks are invisible. That is why edges the
