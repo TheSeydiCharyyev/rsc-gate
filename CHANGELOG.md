@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- `require('./x')` is now an edge. CommonJS was not merely unparsed, it was
+  *invisible*: with no edge, the required file never entered the import graph, so
+  a `.cjs` that a client component pulls in — and that imports `server-only` —
+  produced an empty, all-clear report. The worst possible failure for a tool
+  whose job is to catch exactly that. A `require` behaves like `import * as`: it
+  pulls the whole module and evaluates in the importer's environment.
+
+  The other half of CommonJS is deliberately left unread. `module.exports` names
+  are not extracted, so a named import *through* a `.cjs` still does not resolve
+  — and the report says so (`[opaque — CommonJS exports not analyzed]`) rather
+  than presenting the module as understood. Only literal specifiers create edges:
+  `require(someVariable)` is not statically knowable, and `require.resolve('./x')`
+  yields an id rather than loading a module, so neither is turned into one.
+
 - Bundle cost no longer reports `0 B` for a client component that ships. A chunk
   was called "framework" — and dropped from every total — as soon as a single
   `node_modules` module referenced it. But the manifest lists the chunks a module

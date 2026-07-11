@@ -175,11 +175,22 @@ export function renderReport(a: Analysis, opts: RenderOptions): string {
             : m.envs[0] === 'client'
               ? c('yellow', '[client*]')
               : c('green', '[server]');
-    lines.push(`  ${tag} ${m.file}`);
+    // Say what we could not read, rather than let the module pass for fully analyzed.
+    const opaque = m.opaqueExports ? c('dim', '  [opaque — CommonJS exports not analyzed]') : '';
+    lines.push(`  ${tag} ${m.file}${opaque}`);
   }
   if (bundled.length > 0 || a.modules.some((m) => m.envs.length > 1)) {
     lines.push('');
     lines.push(c('dim', '  [shared] = evaluated in BOTH environments  ·  [client*] = client-bundled without a directive'));
+  }
+  if (a.modules.some((m) => m.opaqueExports)) {
+    lines.push(
+      c(
+        'dim',
+        '  [opaque] = CommonJS: require() edges are followed, but module.exports names are not read —\n' +
+          '            a named import through such a module will not resolve',
+      ),
+    );
   }
 
   return lines.join('\n');

@@ -102,3 +102,27 @@ SERVER-ONLY LEAKS  server-only code reachable from the client bundle
 This detector is intentionally conservative — importing a `"use server"` module
 into a client component is the normal Server-Action pattern and is **not**
 flagged.
+
+Leak detection is only as good as the import graph: a client module the graph
+cannot reach is a module whose leaks are invisible. That is why edges the
+analyzer cannot see are treated as bugs, not as acceptable gaps.
+
+## CommonJS
+
+`require('./x')` is an edge, and is followed. It pulls the whole module and runs
+in the importer's environment, so a `.cjs` required from a client component ships
+to the client — and if it imports `server-only`, that is a leak like any other.
+
+What is *not* read is the other half of CommonJS: `module.exports` / `exports.x`.
+So the names a `.cjs` exports are unknown to us, and a named import *through* one
+does not resolve. Such a module is marked in the report rather than passed off as
+understood:
+
+```text
+MODULES
+  [client*] lib/secrets.cjs  [opaque — CommonJS exports not analyzed]
+```
+
+Only literal specifiers create edges. `require(someVariable)` is not statically
+knowable, and `require.resolve('./x')` returns an id rather than loading a
+module — inventing edges for either would mean guessing.

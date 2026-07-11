@@ -33,7 +33,7 @@ interface Analysis {
   root: string;
   appDir: string;
   entries: string[];
-  modules: ModuleReport[];          // file, directive, envs, clientChain?, pureReexport?
+  modules: ModuleReport[];          // file, directive, envs, clientChain?, pureReexport?, opaqueExports?
   boundaries: Boundary[];           // chain, names
   propsCrossings: PropsCrossing[];  // every client-component JSX usage in server code
   propFindings: PropFinding[];      // the non-ok props

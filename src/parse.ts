@@ -14,6 +14,8 @@ export interface ImportEntry {
   sideEffectOnly: boolean;
   /** import('…') anywhere in the module — a lazy edge, loads in the importer's env. */
   dynamic?: boolean;
+  /** require('…') — CommonJS. Pulls the whole module, like `import * as`. */
+  commonjs?: boolean;
 }
 
 export interface ReexportEntry {
@@ -31,6 +33,13 @@ export interface ParsedModule {
   imports: ImportEntry[];
   reexports: ReexportEntry[];
   localExportNames: Set<string>;
+  /**
+   * The module assigns to `module.exports` / `exports.x`, so its export names are
+   * not in `localExportNames` — we follow edges into it, but cannot resolve a
+   * named import *through* it. Reported as opaque rather than passed off as fully
+   * analyzed (#11).
+   */
+  commonjsExports?: boolean;
 }
 
 function hasExportModifier(st: ts.Statement): boolean {
@@ -135,40 +144,76 @@ export function parseModule(file: string): ParsedModule {
     }
   }
 
-  // Dynamic imports — import('…') anywhere in the module, including inside
-  // next/dynamic(() => import('…')) (#7: lazy client subtrees used to vanish
-  // from the graph). The namespace object may expose everything, and the
-  // module evaluates in the importer's env, so it behaves like `import * as`.
-  // Only literal specifiers are statically knowable; `typeof import('…')` is
-  // a type node, not a CallExpression, so type positions never match.
-  const visitDynamic = (n: ts.Node): void => {
-    if (
-      ts.isCallExpression(n) &&
-      n.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      n.arguments.length > 0 &&
-      ts.isStringLiteralLike(n.arguments[0])
-    ) {
-      // import(/* webpackIgnore: true */ '…') — the bundler leaves the
-      // expression as-is and ships nothing, so there is no edge. The magic
-      // comment is mid-line trivia before the argument (getLeadingCommentRanges
-      // returns nothing for that position), so test the raw trivia slice.
+  // `module.exports = …` / `exports.x = …`. We do not read the names out — that
+  // is what makes such a module opaque (#11) — we only record that it is one.
+  let commonjsExports = false;
+  const isExportsTarget = (e: ts.Expression): boolean => {
+    if (ts.isIdentifier(e)) return e.text === 'exports';
+    if (ts.isPropertyAccessExpression(e)) {
+      if (ts.isIdentifier(e.expression) && e.expression.text === 'module' && e.name.text === 'exports') return true;
+      return isExportsTarget(e.expression); // exports.a.b = …
+    }
+    if (ts.isElementAccessExpression(e)) return isExportsTarget(e.expression); // exports['a'] = …
+    return false;
+  };
+
+  // Expression-position edges, collected anywhere in the module:
+  //
+  //   import('…')   — lazy, but still an edge (#7: lazy client subtrees vanished)
+  //   require('…')  — CommonJS (#11). The file used to be dropped from the graph
+  //                   entirely, so a .cjs requiring "server-only" from a client
+  //                   module produced an empty, all-clear report.
+  //
+  // Both pull the whole module and evaluate in the importer's env, so both behave
+  // like `import * as`. Only literal specifiers are statically knowable.
+  // `typeof import('…')` is a type node, not a CallExpression, so type positions
+  // never match. `require.resolve('…')` has a property-access callee and is left
+  // alone — it hands back an id, and treating it as an edge would be a guess.
+  const visit = (n: ts.Node): void => {
+    if (ts.isCallExpression(n) && n.arguments.length > 0 && ts.isStringLiteralLike(n.arguments[0])) {
       const arg = n.arguments[0];
-      const trivia = sf.text.slice(arg.getFullStart(), arg.getStart(sf));
-      const bundlerIgnored = /(webpack|turbopack)Ignore\s*:\s*true/.test(trivia);
-      if (!bundlerIgnored) {
-        imports.push({
-          specifier: arg.text,
-          names: new Set(),
-          bindings: [],
-          namespace: true,
-          sideEffectOnly: false,
-          dynamic: true,
-        });
+      const isDynamicImport = n.expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire =
+        ts.isIdentifier(n.expression) && n.expression.text === 'require' && n.arguments.length === 1;
+
+      if (isDynamicImport || isRequire) {
+        // import(/* webpackIgnore: true */ '…') — the bundler leaves the
+        // expression as-is and ships nothing, so there is no edge. The magic
+        // comment is mid-line trivia before the argument (getLeadingCommentRanges
+        // returns nothing for that position), so test the raw trivia slice.
+        const trivia = sf.text.slice(arg.getFullStart(), arg.getStart(sf));
+        const bundlerIgnored = /(webpack|turbopack)Ignore\s*:\s*true/.test(trivia);
+        if (!bundlerIgnored) {
+          imports.push({
+            specifier: arg.text,
+            names: new Set(),
+            bindings: [],
+            namespace: true,
+            sideEffectOnly: false,
+            ...(isDynamicImport ? { dynamic: true } : { commonjs: true }),
+          });
+        }
       }
     }
-    ts.forEachChild(n, visitDynamic);
-  };
-  visitDynamic(sf);
 
-  return { file, directive, imports, reexports, localExportNames };
+    if (
+      ts.isBinaryExpression(n) &&
+      n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      isExportsTarget(n.left)
+    ) {
+      commonjsExports = true;
+    }
+
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+
+  return {
+    file,
+    directive,
+    imports,
+    reexports,
+    localExportNames,
+    ...(commonjsExports ? { commonjsExports: true } : {}),
+  };
 }

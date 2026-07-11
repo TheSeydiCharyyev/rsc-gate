@@ -14,6 +14,13 @@ export interface ModuleReport {
   clientChain?: string[];
   /** Pure re-export barrel: no own code, ~0 bundle weight. */
   pureReexport?: boolean;
+  /**
+   * CommonJS: we follow `require()` edges into it, so it is in the graph and its
+   * own imports are checked — but its `module.exports` names are not read, so a
+   * named import *through* it does not resolve. Flagged rather than passed off
+   * as fully analyzed (#11).
+   */
+  opaqueExports?: boolean;
 }
 
 export interface Boundary {
@@ -217,6 +224,7 @@ export function analyzeProject(root: string): Analysis {
       ...(n.parsed.imports.length === 0 && n.parsed.localExportNames.size === 0 && n.parsed.reexports.length > 0
         ? { pureReexport: true }
         : {}),
+      ...(n.parsed.commonjsExports ? { opaqueExports: true } : {}),
     }))
     .sort((a, b) => a.file.localeCompare(b.file));
 
