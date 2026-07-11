@@ -119,7 +119,9 @@ function isSymbolCallee(callee: ts.Expression): boolean {
   return false;
 }
 
-function isServerActionFn(fn: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration): boolean {
+type FnLike = ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration;
+
+function isServerActionFn(fn: FnLike): boolean {
   if (!fn.body || !ts.isBlock(fn.body)) return false;
   const first = fn.body.statements[0];
   return (
@@ -130,6 +132,52 @@ function isServerActionFn(fn: ts.ArrowFunction | ts.FunctionExpression | ts.Func
   );
 }
 
+function hasModifier(st: ts.Statement, kind: ts.SyntaxKind): boolean {
+  const mods = (st as { modifiers?: readonly ts.ModifierLike[] }).modifiers;
+  return mods?.some((m) => m.kind === kind) ?? false;
+}
+
+/**
+ * Which of a module's exports are functions — and which of those are Server
+ * Actions, which are legal props. Needed because an *imported* function passed to
+ * a client component is the same hazard as a local one, and the export kinds are
+ * not in ParsedModule (it records names only). Parsed lazily, cached per file.
+ */
+function exportedFunctionKinds(file: string, cache: Map<string, Map<string, 'function' | 'action'>>) {
+  const hit = cache.get(file);
+  if (hit) return hit;
+
+  const kinds = new Map<string, 'function' | 'action'>();
+  try {
+    const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+    for (const st of sf.statements) {
+      if (!hasModifier(st, ts.SyntaxKind.ExportKeyword)) continue;
+      const isDefault = hasModifier(st, ts.SyntaxKind.DefaultKeyword);
+      const record = (name: string, fn: FnLike) =>
+        kinds.set(name, isServerActionFn(fn) ? 'action' : 'function');
+
+      if (ts.isFunctionDeclaration(st)) {
+        if (st.name) record(st.name.text, st);
+        if (isDefault) record('default', st);
+      } else if (ts.isVariableStatement(st)) {
+        for (const d of st.declarationList.declarations) {
+          if (
+            ts.isIdentifier(d.name) &&
+            d.initializer &&
+            (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))
+          ) {
+            record(d.name.text, d.initializer);
+          }
+        }
+      }
+    }
+  } catch {
+    /* unreadable module — treat as having no known function exports */
+  }
+  cache.set(file, kinds);
+  return kinds;
+}
+
 export function analyzeProps(
   nodes: Map<string, NodeLike>,
   resolver: Resolver,
@@ -137,6 +185,7 @@ export function analyzeProps(
 ): { crossings: PropsCrossing[]; findings: PropFinding[] } {
   const crossings: PropsCrossing[] = [];
   const findings: PropFinding[] = [];
+  const exportKinds = new Map<string, Map<string, 'function' | 'action'>>();
 
   for (const [file, node] of nodes) {
     // Only server-evaluated modules without their own "use client" can cross the boundary via JSX.
@@ -147,6 +196,8 @@ export function analyzeProps(
     const clientTags = new Map<string, string>();
     // locals imported from "use server" modules are server actions — legal props
     const actionLocals = new Set<string>();
+    // locals bound to a plain (non-action) function exported by another module
+    const importedFns = new Set<string>();
     // locals bound to next/dynamic and React.lazy — the lazy-component factories
     const lazyFactories = new Set<string>();
     const reactNamespaces = new Set<string>();
@@ -166,8 +217,20 @@ export function analyzeProps(
         const origin = resolveExportOrigin(nodes, resolver, target, b.imported);
         if (!origin) continue;
         const originNode = nodes.get(origin);
-        if (originNode?.parsed.directive === 'use client') clientTags.set(b.local, origin);
-        if (originNode?.parsed.directive === 'use server') actionLocals.add(b.local);
+        // A client component passed as a prop is a client *reference*, which React
+        // does serialize — so it is a tag, never a function hazard.
+        if (originNode?.parsed.directive === 'use client') {
+          clientTags.set(b.local, origin);
+        } else if (originNode?.parsed.directive === 'use server') {
+          actionLocals.add(b.local);
+        } else {
+          // An imported plain function is exactly the hazard an inline arrow is —
+          // it just used to be invisible, because only functions declared in *this*
+          // file were tracked.
+          const kind = exportedFunctionKinds(origin, exportKinds).get(b.imported);
+          if (kind === 'function') importedFns.add(b.local);
+          else if (kind === 'action') actionLocals.add(b.local);
+        }
       }
     }
 
@@ -252,27 +315,82 @@ export function analyzeProps(
       }
     }
 
+    /**
+     * React serializes a prop by walking into it, so a hazard buried in an object,
+     * an array or a branch of a ternary breaks the build exactly like a bare one:
+     * `{ onPick: () => {} }` throws at prerender just as `onPick={() => {}}` does.
+     * Only the top level used to be looked at, so all of those read as `ok`.
+     *
+     * We descend only where the value is statically knowable. A call result, a
+     * template literal or a nested JSX element is opaque — guessing at it would
+     * mean inventing findings, so those stay `ok`.
+     */
+    const hazardOf = (expr: ts.Expression, depth = 0): PropVerdict | null => {
+      if (depth > 8) return null; // pathological nesting — stop rather than stall
+
+      if (ts.isParenthesizedExpression(expr)) return hazardOf(expr.expression, depth);
+      if (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr) || ts.isNonNullExpression(expr)) {
+        return hazardOf(expr.expression, depth);
+      }
+
+      if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
+        return isServerActionFn(expr) ? null : 'function';
+      }
+      if (ts.isNewExpression(expr)) {
+        const ctor = ts.isIdentifier(expr.expression) ? expr.expression.text : null;
+        return ctor && SERIALIZABLE_CTORS.has(ctor) ? null : 'class-instance';
+      }
+      if (ts.isCallExpression(expr) && isSymbolCallee(expr.expression)) return 'symbol';
+      if (ts.isIdentifier(expr)) {
+        if (actionLocals.has(expr.text) || localActions.has(expr.text)) return null; // Server Action
+        if (localFns.has(expr.text) || importedFns.has(expr.text)) return 'function-ref';
+        return null;
+      }
+
+      if (ts.isConditionalExpression(expr)) {
+        return hazardOf(expr.whenTrue, depth + 1) ?? hazardOf(expr.whenFalse, depth + 1);
+      }
+      if (
+        ts.isBinaryExpression(expr) &&
+        (expr.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+          expr.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)
+      ) {
+        return hazardOf(expr.left, depth + 1) ?? hazardOf(expr.right, depth + 1);
+      }
+      if (ts.isObjectLiteralExpression(expr)) {
+        for (const p of expr.properties) {
+          if (ts.isPropertyAssignment(p)) {
+            const hit = hazardOf(p.initializer, depth + 1);
+            if (hit) return hit;
+          } else if (ts.isShorthandPropertyAssignment(p)) {
+            const hit = hazardOf(p.name, depth + 1);
+            if (hit) return hit;
+          } else if (ts.isMethodDeclaration(p)) {
+            if (!isServerActionFn(p)) return 'function'; // { onPick() {} }
+          }
+          // a spread inside the object is not knowable — leave it alone
+        }
+        return null;
+      }
+      if (ts.isArrayLiteralExpression(expr)) {
+        for (const el of expr.elements) {
+          if (ts.isSpreadElement(el)) continue;
+          const hit = hazardOf(el, depth + 1);
+          if (hit) return hit;
+        }
+        return null;
+      }
+
+      return null;
+    };
+
     const classify = (attr: ts.JsxAttributeLike): { name: string; verdict: PropVerdict } => {
       if (ts.isJsxSpreadAttribute(attr)) return { name: '...spread', verdict: 'spread' };
       const name = attr.name.getText(sf);
       const init = attr.initializer;
       if (!init || ts.isStringLiteral(init)) return { name, verdict: 'ok' };
       if (ts.isJsxExpression(init) && init.expression) {
-        const expr = init.expression;
-        if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
-          return { name, verdict: isServerActionFn(expr) ? 'ok' : 'function' };
-        }
-        if (ts.isNewExpression(expr)) {
-          const ctor = ts.isIdentifier(expr.expression) ? expr.expression.text : null;
-          return { name, verdict: ctor && SERIALIZABLE_CTORS.has(ctor) ? 'ok' : 'class-instance' };
-        }
-        if (ts.isCallExpression(expr) && isSymbolCallee(expr.expression)) {
-          return { name, verdict: 'symbol' };
-        }
-        if (ts.isIdentifier(expr)) {
-          if (actionLocals.has(expr.text) || localActions.has(expr.text)) return { name, verdict: 'ok' };
-          if (localFns.has(expr.text)) return { name, verdict: 'function-ref' };
-        }
+        return { name, verdict: hazardOf(init.expression) ?? 'ok' };
       }
       return { name, verdict: 'ok' };
     };

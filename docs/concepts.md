@@ -84,7 +84,20 @@ rsc-gate gives each prop a verdict:
 
 **Server Actions are allowed.** A function with a `"use server"` body, or one
 imported from a `"use server"` module, is recognized as a legal prop and not
-flagged.
+flagged. So is a client component passed as a prop — that is a client *reference*,
+which React serializes.
+
+**Nesting counts.** React walks into a prop to serialize it, so a function inside
+an object, an array, a ternary branch or an object method is the same failure as a
+bare one, and is reported the same way:
+
+```tsx
+<Chart options={{ onSelect: () => {} }} />   // ✖ function — NOT serializable
+```
+
+The walk stops where the value stops being knowable. A call result
+(`onPick={makeHandler()}`), a template literal or a nested JSX element is opaque —
+rsc-gate does not guess at those, because a guess would be a false positive.
 
 `--strict` exits with code `2` when any non-spread hazard is found, so CI can
 fail the build before prerender does. It also fails on server-only leaks — see

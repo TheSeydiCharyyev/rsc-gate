@@ -31,6 +31,7 @@ jobs:
           node dist/cli.js fixtures/commonjs --no-color
           node dist/cli.js fixtures/baseurl-bare --no-color
           node dist/cli.js fixtures/jsconfig --no-color
+          node dist/cli.js fixtures/nested-props --no-color
 
       - name: Bundle cost is reported from the committed build snapshot
         shell: bash

@@ -8,6 +8,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false negatives)
 
+- A hazard buried inside a prop is now found. React serializes a prop by walking
+  into it, so `onPick={{ handler: () => {} }}` throws at prerender exactly as
+  `onPick={() => {}}` does — but only the top level of each prop was inspected, so
+  a function inside an object, an array, a ternary, a `??`/`||` branch or an object
+  method shorthand all read as `ok`. A project whose hazards were all one level
+  down passed `--strict` green and then failed `next build`.
+
+  The walk stops where the value stops being knowable: a call result, a template
+  literal or a nested JSX element is opaque, and guessing at it would mean
+  inventing findings.
+
+- An imported function passed as a prop is now flagged, like a local one. Only
+  functions *declared in the calling file* were tracked, so `import { helper }` and
+  then `<Client cb={helper} />` was reported as fine. Server Actions are still
+  legal — imported from a `"use server"` module, or a function whose body opens
+  with the directive — and a client component passed as a prop stays legal too: it
+  is a client *reference*, which React does serialize.
+
 - Props of a lazily loaded client component are now checked. `const Chart =
   dynamic(() => import('./Chart'))` arrives as a *local variable*, not an import
   binding, and the set of known client tags was built from import bindings alone —
