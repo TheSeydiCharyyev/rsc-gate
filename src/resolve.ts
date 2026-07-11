@@ -21,10 +21,16 @@ function tryFile(base: string): string | null {
   return null;
 }
 
-/** Minimal tsconfig "paths" support: prefix patterns like "@/*": ["./*"]. */
+/** tsconfig "paths" (prefix + exact) and bare-specifier resolution via "baseUrl". */
 export function createResolver(projectRoot: string): Resolver {
   const aliases: { prefix: string; targets: string[] }[] = [];
   const exactAliases = new Map<string, string[]>();
+  /**
+   * Only an EXPLICIT baseUrl resolves bare specifiers — never the pathsBasePath
+   * fallback, or every project would start resolving bare names against its own
+   * folders and shadow real packages.
+   */
+  let bareBase: string | null = null;
   // Forward slashes: TS normalizes paths in diagnostics, and a backslash path
   // makes it throw a Debug Failure on malformed JSON instead of degrading.
   const tsconfigPath = join(projectRoot, 'tsconfig.json').replaceAll('\\', '/');
@@ -46,6 +52,7 @@ export function createResolver(projectRoot: string): Resolver {
     // the config file that declared them (TS 4.1+ semantics, pathsBasePath).
     const pathsBase = typeof co.pathsBasePath === 'string' ? co.pathsBasePath : projectRoot;
     const baseUrl = co.baseUrl ?? pathsBase;
+    if (co.baseUrl !== undefined) bareBase = co.baseUrl;
     for (const [pattern, targets] of Object.entries(co.paths ?? {})) {
       if (pattern.endsWith('/*')) {
         aliases.push({
@@ -83,8 +90,10 @@ export function createResolver(projectRoot: string): Resolver {
         }
         return null;
       }
+      let patternMatched = false;
       for (const { prefix, targets } of aliases) {
         if (specifier.startsWith(prefix)) {
+          patternMatched = true;
           const rest = specifier.slice(prefix.length);
           for (const t of targets) {
             const hit = tryFile(join(t, rest));
@@ -92,7 +101,24 @@ export function createResolver(projectRoot: string): Resolver {
           }
         }
       }
-      return null; // bare specifier => external package
+      // A matched pattern is definitive too, exactly like an exact key: verified
+      // against ts.resolveModuleName — with a dead target, tsc reports the module
+      // unresolved even when baseUrl WOULD have found a file for that specifier.
+      if (patternMatched) return null;
+
+      // Bare specifier under an explicit baseUrl — 'components/Leaky' → ./components/Leaky.
+      // A documented Next/TS feature, and previously a silent hole: the resolver
+      // returned null, the graph collapsed to the entries, and the empty report
+      // read as "all clean" — the worst way for this tool to be wrong.
+      // Only a file that actually exists wins, so real packages stay external.
+      // (Where a file does exist, it shadows a package — that is tsc's behaviour
+      // too, not a liberty taken here.)
+      if (bareBase) {
+        const hit = tryFile(resolve(bareBase, specifier));
+        if (hit) return hit;
+      }
+
+      return null; // external package
     },
   };
 }

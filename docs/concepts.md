@@ -107,6 +107,27 @@ Leak detection is only as good as the import graph: a client module the graph
 cannot reach is a module whose leaks are invisible. That is why edges the
 analyzer cannot see are treated as bugs, not as acceptable gaps.
 
+## Module resolution
+
+The graph is only as good as the resolver: an import it cannot follow is a module
+it cannot see, and a leak inside that module is one it cannot report. So the rules
+match `tsc` deliberately, and were checked against `ts.resolveModuleName`:
+
+1. **Relative** — `./x`, `../x`.
+2. **Exact `paths` key** — `"@/lib": ["./src/lib"]`. Beats a pattern, and is
+   **final**: if its target does not exist, the module is unresolved. There is no
+   second guess.
+3. **`paths` pattern** — `"@/*": ["./src/*"]`. Also final once matched.
+4. **`baseUrl`** — with an explicit `baseUrl`, a bare `components/C` resolves to
+   `./components/C`. Only if the file exists, so real packages stay external.
+5. Otherwise the specifier is an external package.
+
+Step 4 applies **only** to an explicit `baseUrl` in the config. And note what
+steps 2–3 mean in practice: when a `paths` alias points somewhere that does not
+exist, rsc-gate reports nothing rather than reaching for `baseUrl` — because that
+is what tsc does, and a resolution tsc does not make is an edge the bundler will
+not make either.
+
 ## CommonJS
 
 `require('./x')` is an edge, and is followed. It pulls the whole module and runs

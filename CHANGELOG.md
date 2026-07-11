@@ -8,6 +8,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- Bare specifiers under an explicit `baseUrl` now resolve. `baseUrl: "."` plus
+  `import { C } from 'components/C'` is a documented Next/TS setup, and the
+  resolver returned `null` for it — so the import graph collapsed to the entry
+  files, and rsc-gate printed a clean, empty report for a project it had not
+  actually looked at. An empty all-clear is the worst way for this tool to be
+  wrong, and it was reachable from a plain `tsconfig.json`.
+
+  Only an *explicit* `baseUrl` does this — never the `pathsBasePath` fallback,
+  or every project would start resolving bare names against its own folders —
+  and only when the file really exists, so packages stay external. The
+  precedence rules were checked against `ts.resolveModuleName` rather than
+  assumed: `paths` beats `baseUrl`, and a **matched** `paths` key or pattern is
+  final. tsc reports the module unresolved when its target is dead, even where
+  `baseUrl` would have found a file, and rsc-gate now does the same — falling
+  back there would have conjured edges tsc does not have.
+
 - `require('./x')` is now an edge. CommonJS was not merely unparsed, it was
   *invisible*: with no edge, the required file never entered the import graph, so
   a `.cjs` that a client component pulls in — and that imports `server-only` —
@@ -141,8 +157,8 @@ Argument parsing moved to `src/args.ts` as a pure function, and is covered by
   from an app entry in the client environment. (Note: leak detection is now
   only as complete as the import graph — a client file the graph cannot reach
   is silent. Dynamic-import edges, `extends` chains and exact aliases are
-  covered as of this release; the known remaining gap is `baseUrl`-only bare
-  specifiers.)
+  covered as of this release; `baseUrl`-only bare specifiers were the known
+  remaining gap, closed in Unreleased along with `require()`.)
 - `export * as ns from './x'` is now followed correctly. It used to be
   recorded as a transparent wildcard AND a terminal local export — so the BFS
   stopped at the barrel (a client module behind it never got the client env,

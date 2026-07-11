@@ -29,6 +29,7 @@ jobs:
           node dist/cli.js fixtures/edge --no-color
           node dist/cli.js fixtures/frozen-build --no-color
           node dist/cli.js fixtures/commonjs --no-color
+          node dist/cli.js fixtures/baseurl-bare --no-color
 
       - name: Bundle cost is reported from the committed build snapshot
         shell: bash
