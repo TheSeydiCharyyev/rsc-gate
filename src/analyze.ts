@@ -1,4 +1,4 @@
-import { readdirSync, statSync, existsSync } from 'node:fs';
+import { readdirSync, realpathSync, statSync, existsSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { parseModule, type ParsedModule } from './parse.js';
 import { analyzeProps, type PropFinding, type PropsCrossing } from './props.js';
@@ -58,14 +58,37 @@ const SERVER_ONLY_PACKAGES = new Set(['server-only']);
 const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git', '.turbo', 'coverage']);
 const ENTRY_NAMES = /^(page|layout|template|loading|error|not-found|global-error|default|route)\.(tsx|ts|jsx|js)$/;
 
-function listSourceFiles(dir: string): string[] {
+/**
+ * Walk the project for source files, following symlinks the way a bundler does —
+ * but only once each. Symlinked source directories are real in monorepos, so
+ * skipping them would drop modules from the graph (a silent false negative). The
+ * catch is that a link back into an ancestor is a cycle: the old walk recursed
+ * into it until the OS gave up with ELOOP and the whole analysis died. Keying the
+ * visited set on the *real* path breaks the cycle at the first repeat, and lets a
+ * file reachable by two paths be analyzed once, not twice.
+ */
+function listSourceFiles(dir: string, seenDirs = new Set<string>()): string[] {
+  let realDir: string;
+  try {
+    realDir = realpathSync(dir);
+  } catch {
+    return []; // broken link, or a directory we cannot read
+  }
+  if (seenDirs.has(realDir)) return [];
+  seenDirs.add(realDir);
+
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
-    const st = statSync(full);
+    let st;
+    try {
+      st = statSync(full); // follows links, like the bundler's resolver
+    } catch {
+      continue; // dangling symlink — nothing there to analyze
+    }
     if (st.isDirectory()) {
-      if (!SKIP_DIRS.has(name)) out.push(...listSourceFiles(full));
-    } else if (SOURCE_EXTS.some((e) => full.endsWith(e))) {
+      if (!SKIP_DIRS.has(name)) out.push(...listSourceFiles(full, seenDirs));
+    } else if (st.isFile() && SOURCE_EXTS.some((e) => full.endsWith(e))) {
       out.push(full);
     }
   }

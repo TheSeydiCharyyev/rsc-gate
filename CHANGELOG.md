@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A symlink cycle in the project tree no longer kills the analysis. The walk
+  followed links with `statSync` and recursed through `components/self/components/
+  self/…` until the OS refused with `ELOOP` — rsc-gate died with an unhandled fs
+  error instead of reporting on the project. The visited set is now keyed on the
+  *real* path, so a cycle stops at the first repeat.
+
+  Links are still followed, deliberately: a symlinked source directory is a real
+  monorepo pattern, and skipping it would drop those modules from the graph —
+  a silent false negative in exactly the projects that use them. A file reachable
+  by two paths is analyzed once, not twice, and a dangling link is skipped rather
+  than thrown on.
+
 ## [0.2.0] — 2026-07-11
 
 The theme of this release is **an empty report is a bug**. Four separate paths
