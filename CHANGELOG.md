@@ -8,6 +8,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- `analyzeProject('./my-app')` no longer returns an empty report. `listSourceFiles`
+  walks with `join(root, …)`, so the node map inherited the root's shape, while the
+  resolver always hands back absolute paths — with a relative root, every
+  `nodes.get(target)` missed, every edge was dropped, and the graph collapsed to
+  the entry files. The result was a clean, empty report for a project nobody had
+  actually looked at: leaks vanished, and `strictGate()` returned `pass` for a
+  project that leaks. The CLI resolves its argument before calling in, so only API
+  callers were affected. The root is now normalized at the door, and `Analysis.root`
+  is absolute however the caller spells it.
+
 - Bare specifiers under an explicit `baseUrl` now resolve. `baseUrl: "."` plus
   `import { C } from 'components/C'` is a documented Next/TS setup, and the
   resolver returned `null` for it — so the import graph collapsed to the entry

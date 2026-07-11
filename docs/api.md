@@ -28,9 +28,12 @@ for (const v of analysis.serverOnlyViolations) {
 Pure static analysis — does not run the app. Throws if `root` has no `app/` or
 `src/app/` directory.
 
+`root` may be relative or absolute; it is resolved against `process.cwd()`, and
+`Analysis.root` comes back absolute either way.
+
 ```ts
 interface Analysis {
-  root: string;
+  root: string;                     // absolute, however you spelled it
   appDir: string;
   entries: string[];
   modules: ModuleReport[];          // file, directive, envs, clientChain?, pureReexport?, opaqueExports?

@@ -1,5 +1,5 @@
 import { readdirSync, statSync, existsSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { parseModule, type ParsedModule } from './parse.js';
 import { analyzeProps, type PropFinding, type PropsCrossing } from './props.js';
 import { createResolver, SOURCE_EXTS, type Resolver } from './resolve.js';
@@ -88,7 +88,14 @@ interface WorkItem {
   names: Set<string> | '*';
 }
 
-export function analyzeProject(root: string): Analysis {
+export function analyzeProject(projectRoot: string): Analysis {
+  // Normalize at the door. listSourceFiles walks with join(root, …), so the node
+  // map inherits the root's shape — while the resolver always hands back absolute
+  // paths. A relative root therefore made every nodes.get(target) miss: each edge
+  // was dropped, the graph collapsed to the entry files, and the report came back
+  // empty — "all clean" for a project nobody had actually looked at. The CLI
+  // resolves its argument, so only API callers ever hit it.
+  const root = resolve(projectRoot);
   const appDir = ['app', join('src', 'app')].map((d) => join(root, d)).find((d) => existsSync(d));
   if (!appDir) throw new Error(`No app/ or src/app/ directory found under ${root}`);
 
