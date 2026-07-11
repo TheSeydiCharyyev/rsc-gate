@@ -50,6 +50,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false positives — the project's #1 principle)
 
+- Bundle cost no longer bills a component for another module's chunk. A manifest
+  entry was matched to a source file by the *tail* of its path, and a monorepo has
+  more than one `components/Button.tsx` — so whichever entry came first in the
+  manifest won. Measured on a two-package repo: the app's `Button` (300 B) was
+  reported at **9000 B**, the size of a chunk belonging to `packages/ui`. Entries
+  are now matched against the file's real path, and where several still fit, the
+  most specific wins; a genuine tie is left unattributed rather than guessed at,
+  because a wrong cost is worse than a missing one.
+
 - `"server-only"` aliased to a local shim is no longer reported as a leak. The
   check matched the raw specifier, before resolution — so a project that maps
   `"server-only": ["./lib/shim"]` in tsconfig `paths` (a real pattern, e.g. to keep

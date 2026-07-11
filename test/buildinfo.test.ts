@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { afterAll, describe, expect, it } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzeProject } from '../src/analyze.js';
@@ -222,6 +223,36 @@ describe('readBuildInfo on the frozen build snapshot (#14)', () => {
     expect(info.sharedBytes).toBe(FRAMEWORK_BYTES); // …but the bytes are not hidden
     expect(info.sharedGzipBytes).toBeGreaterThan(0);
     expect(info.sharedGzipBytes).toBeLessThan(info.sharedBytes);
+  });
+});
+
+// A monorepo has more than one components/Button.tsx. Matching a manifest entry by
+// the tail of its path collided: whichever came first won, so a component could be
+// billed for a chunk belonging to an entirely different module.
+describe('manifest paths are matched against the real path, not a tail', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'rsc-gate-monorepo-cost-'));
+  afterAll(() => rmSync(repo, { recursive: true, force: true }));
+
+  const app = join(repo, 'apps', 'web');
+  mkdirSync(join(app, '.next', 'server', 'app'), { recursive: true });
+  mkdirSync(join(app, '.next', 'static', 'chunks'), { recursive: true });
+  writeFileSync(
+    join(app, '.next', 'server', 'app', 'page_client-reference-manifest.js'),
+    'globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n' +
+      'globalThis.__RSC_MANIFEST["/page"] = {"clientModules":{' +
+      '"[project]/packages/ui/components/Button.tsx":{"id":1,"name":"*","chunks":["/_next/static/chunks/ui.js"],"async":false},' +
+      '"[project]/apps/web/components/Button.tsx":{"id":2,"name":"*","chunks":["/_next/static/chunks/web.js"],"async":false}}};',
+  );
+  writeFileSync(join(app, '.next', 'static', 'chunks', 'ui.js'), 'X'.repeat(9000));
+  writeFileSync(join(app, '.next', 'static', 'chunks', 'web.js'), 'Y'.repeat(300));
+
+  const info = readBuildInfo(app, ['components/Button.tsx'])!;
+
+  it('bills the app its own chunk, not the one from another package', () => {
+    const cost = info.moduleCosts.find((m) => m.file === 'components/Button.tsx')!;
+    expect(cost.chunks.map((c) => c.url)).toEqual(['/_next/static/chunks/web.js']);
+    expect(cost.ownBytes).toBe(300); // was 9000 — packages/ui's chunk, 30× wrong
+    expect(info.appBytes).toBe(300);
   });
 });
 

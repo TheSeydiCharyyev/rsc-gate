@@ -152,16 +152,35 @@ export function readBuildInfo(root: string, clientFiles: string[]): BuildInfo | 
     if (m.fromNodeModules) for (const c of m.chunks) frameworkChunks.add(c);
   }
 
-  // Match manifest project modules to analysis files by path suffix.
+  // Match manifest entries to analysis files.
+  //
+  // The manifest path is relative to the *workspace* root ("apps/web/components/
+  // Button.tsx"), while an analysis file is relative to the app being analyzed
+  // ("components/Button.tsx"). Matching on the tail alone collides in a monorepo:
+  // packages/ui/components/Button.tsx ends with the same tail, and whichever came
+  // first in the manifest won — so a component could be billed for a chunk that
+  // belongs to an entirely different module. Match against the file's real path
+  // instead, and when several entries are still tails of it, take the most
+  // specific one.
+  const rootPosix = root.replaceAll('\\', '/').replace(/\/+$/, '');
+  const projectModules = [...modules.values()].filter((m) => !m.fromNodeModules);
+  const isTailOf = (path: string, m: ManifestModule) => path === m.modulePath || path.endsWith('/' + m.modulePath);
+
   const matched = new Map<string, ManifestModule>(); // analysis file -> manifest entry
   for (const file of clientFiles) {
-    for (const m of modules.values()) {
-      if (m.fromNodeModules) continue;
-      if (m.modulePath === file || m.modulePath.endsWith('/' + file)) {
-        matched.set(file, m);
-        break;
-      }
-    }
+    const full = `${rootPosix}/${file}`;
+    let hits = projectModules.filter((m) => isTailOf(full, m));
+
+    // Fall back to the old tail match only if nothing lines up with the real path
+    // — a manifest whose paths are rooted somewhere we cannot reconstruct.
+    if (hits.length === 0) hits = projectModules.filter((m) => isTailOf(file, m));
+    if (hits.length === 0) continue;
+
+    const longest = Math.max(...hits.map((m) => m.modulePath.length));
+    const best = hits.filter((m) => m.modulePath.length === longest);
+    // Still tied: two entries we cannot tell apart. Attributing one of them would
+    // be a guess, and a wrong cost is worse than a missing one.
+    if (best.length === 1) matched.set(file, best[0]);
   }
   if (matched.size === 0) return null;
 
