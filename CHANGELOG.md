@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The CLI now rejects an argument line it cannot honour instead of guessing.
+  Previously every unrecognized `--flag` was accepted and then ignored, so
+  `rsc-gate --stirct` — a typo — analyzed the project, found the hazard, and
+  exited `0`: a CI gate that silently never fired. Unknown options, a value
+  handed to a boolean flag (`--json=true`), a second positional argument and
+  `--json --html` together are now errors with exit code `1`.
+
+### Fixed
+
+- `rsc-gate --html ./app` no longer swallows the project directory. `--html`
+  takes an optional value, so a bare token after it was ambiguous; the old
+  parser always consumed it, leaving the tool to analyze the *current*
+  directory and then write its report to a path that was really a directory
+  (`EISDIR`). A token is now read as the report path only when it ends in
+  `.html`/`.htm`; anything else stays the `[dir]` argument. `--html=<path>`
+  sets the path explicitly, whatever its extension, and pointing it at an
+  existing directory is now a clear error rather than a stray `EISDIR`.
+- `--json --html out.html` printed the JSON report and wrote no HTML: `--json`
+  won the branch, and the requested file was dropped without a word. The
+  combination is now rejected.
+- `-h` works. It was checked for (`flags.has('-h')`) but never collected, as
+  only `--`-prefixed tokens entered the flag set, so `rsc-gate -h` was parsed
+  as a *directory named `-h`* and failed with "No app/ or src/app/ directory
+  found under …/-h". A bare `--` is now the usual end-of-options separator.
+- `--explain --json` reported `no explanation for '--json'`. `--explain` now
+  refuses to read a following flag as its error code, and says
+  `--explain expects an error code` when none was given.
+
+Argument parsing moved to `src/args.ts` as a pure function, and is covered by
+22 unit tests; `cli.ts` keeps only the I/O.
+
 ### Added
 
 - `import('…')` and `next/dynamic(() => import('…'))` edges are now part of

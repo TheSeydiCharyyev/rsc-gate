@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { analyzeProject } from './analyze.js';
+import { parseArgs } from './args.js';
 import { readBuildInfo } from './buildinfo.js';
 import { renderReport, renderExplanation, renderExplanationList } from './report.js';
 import { renderHtml } from './html.js';
@@ -11,24 +12,17 @@ import { findExplanation } from './explain.js';
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
 
-const args = process.argv.slice(2);
-const flags = new Set(args.filter((a) => a.startsWith('--')));
+const parsed = parseArgs(process.argv.slice(2));
+if (!parsed.ok) {
+  console.error(`rsc-gate: ${parsed.error}`);
+  console.error('run `rsc-gate --help` for usage.');
+  process.exit(1);
+}
+const opts = parsed.options;
 
-// `--explain <code>` / `--html [path]` may consume the following token; keep
-// those out of dirArg detection.
-const explainIdx = args.indexOf('--explain');
-const explainQuery = explainIdx !== -1 ? args[explainIdx + 1] : undefined;
-const htmlIdx = args.indexOf('--html');
-const htmlPathArg = htmlIdx !== -1 && args[htmlIdx + 1] && !args[htmlIdx + 1].startsWith('--') ? args[htmlIdx + 1] : undefined;
-const consumed = new Set<number>();
-if (explainIdx !== -1) consumed.add(explainIdx + 1);
-if (htmlPathArg) consumed.add(htmlIdx + 1);
-const positional = args.filter((a, i) => !a.startsWith('--') && !consumed.has(i));
-const dirArg = positional[0];
+const color = !opts.noColor && process.stdout.isTTY !== false && !process.env.NO_COLOR;
 
-const color = !flags.has('--no-color') && process.stdout.isTTY !== false && !process.env.NO_COLOR;
-
-if (flags.has('--help') || flags.has('-h')) {
+if (opts.help) {
   console.log(
     [
       `rsc-gate v${version} — catch RSC boundary bugs before next build`,
@@ -41,40 +35,49 @@ if (flags.has('--help') || flags.has('-h')) {
       '  --no-build       skip reading .next/ bundle-cost data',
       '  --strict         exit 2 when serialization hazards are found (CI gate)',
       '  --html [path]    write a self-contained HTML report (default: rsc-gate-report.html)',
+      '                   the path must end in .html/.htm, or be given as --html=<path>',
       '  --explain <code> show a fix guide for a known RSC error',
+      '  -h, --help       show this help',
     ].join('\n'),
   );
   process.exit(0);
 }
 
-if (flags.has('--explain')) {
-  const found = explainQuery ? findExplanation(explainQuery) : null;
+if (opts.explain) {
+  const found = opts.explainQuery ? findExplanation(opts.explainQuery) : null;
   if (found) {
     console.log(renderExplanation(found, { color }));
     process.exit(0);
   }
-  console.error(`rsc-gate: no explanation for '${explainQuery ?? ''}'.`);
+  console.error(
+    opts.explainQuery
+      ? `rsc-gate: no explanation for '${opts.explainQuery}'.`
+      : 'rsc-gate: --explain expects an error code.',
+  );
   console.error(renderExplanationList({ color }));
   process.exit(1);
 }
 
-const root = resolve(dirArg ?? '.');
+const root = resolve(opts.dir ?? '.');
 
 try {
   const analysis = analyzeProject(root);
   const clientFiles = analysis.modules.filter((m) => m.directive === 'use client').map((m) => m.file);
-  const build = flags.has('--no-build') ? null : readBuildInfo(root, clientFiles);
+  const build = opts.noBuild ? null : readBuildInfo(root, clientFiles);
 
-  if (flags.has('--json')) {
+  if (opts.json) {
     console.log(JSON.stringify({ ...analysis, build }, null, 2));
-  } else if (flags.has('--html')) {
-    const out = resolve(htmlPathArg ?? 'rsc-gate-report.html');
+  } else if (opts.html) {
+    const out = resolve(opts.htmlPath);
+    if (statSync(out, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(`--html expects a file path, but '${opts.htmlPath}' is a directory`);
+    }
     writeFileSync(out, renderHtml(analysis, build, version), 'utf8');
     console.log(`report written to ${out}`);
   } else {
     console.log(renderReport(analysis, { color, version, build }));
   }
-  if (flags.has('--strict') && analysis.propFindings.some((f) => f.kind !== 'spread')) {
+  if (opts.strict && analysis.propFindings.some((f) => f.kind !== 'spread')) {
     process.exit(2);
   }
 } catch (err) {

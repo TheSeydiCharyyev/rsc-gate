@@ -50,6 +50,12 @@ Flags:
 | `--json` | machine-readable output |
 | `--no-build` | skip reading `.next/` (boundary map only, no bundle cost) |
 | `--no-color` | plain text |
+| `-h`, `--help` | usage |
+
+Because `--html`'s path is optional, a bare token after it is only read as the
+report path when it ends in `.html`/`.htm` — so `rsc-gate --html ./app` still
+analyzes `./app` and writes the default report. Use `--html=<path>` to set any
+other path explicitly. Unknown options are an error, not a silent no-op.
 
 ## What it catches
 
