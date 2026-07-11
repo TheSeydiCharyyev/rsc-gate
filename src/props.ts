@@ -110,13 +110,21 @@ function resolveExportOrigin(
   return null;
 }
 
-/** Matches `Symbol(...)` and `Symbol.for(...)`. */
+/**
+ * Matches `Symbol(...)` — and deliberately NOT `Symbol.for(...)`.
+ *
+ * Flight does not reject symbols; it rejects symbols it cannot name. The check is
+ * `if (Symbol.for(name) !== value) throw` (ReactFlightServer.js, react v19.0.0):
+ * a symbol from the global registry round-trips through its key and crosses, and
+ * only an unregistered `Symbol('x')` throws — the thrown message says so itself
+ * ("Only global symbols received from Symbol.for(...) can be passed to Client
+ * Components").
+ *
+ * Flagging `Symbol.for(...)` was a false positive that failed a healthy project's
+ * `--strict` run, which is the worst bug this tool can have.
+ */
 function isSymbolCallee(callee: ts.Expression): boolean {
-  if (ts.isIdentifier(callee)) return callee.text === 'Symbol';
-  if (ts.isPropertyAccessExpression(callee)) {
-    return ts.isIdentifier(callee.expression) && callee.expression.text === 'Symbol';
-  }
-  return false;
+  return ts.isIdentifier(callee) && callee.text === 'Symbol';
 }
 
 type FnLike = ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration;

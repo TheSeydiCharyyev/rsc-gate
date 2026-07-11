@@ -79,7 +79,7 @@ rsc-gate gives each prop a verdict:
 | `ok` | serializable (primitives, plain objects, arrays, and React 19 built-ins like `Date`/`Map`/`Set`/`Promise`) |
 | `function` / `function-ref` | a function — not serializable; `next build` fails at prerender. Pass a Server Action instead, or move the handler into the client component |
 | `class-instance` | a `new Foo()` instance — pass plain data (a POJO) |
-| `symbol` | a `Symbol()` — not serializable |
+| `symbol` | an unregistered `Symbol()` — not serializable. `Symbol.for(...)` is fine: Flight names a global symbol by its key and re-derives it on the client |
 | `spread` | a `{...spread}` that can't be statically verified |
 
 **Server Actions are allowed.** A function with a `"use server"` body, or one

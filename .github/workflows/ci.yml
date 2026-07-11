@@ -72,11 +72,12 @@ jobs:
 
           # Must PASS — healthy projects. A gate that fires here is useless.
           #   server-only-alias: "server-only" aliased to a local shim — the 0.2.0 FP
+          #   symbol-global:     Symbol.for(...) crosses the boundary — the 0.3.0 FP
           #   no-baseurl:        bare specifier, no baseUrl — nothing resolves, nothing leaks
           #   wildcard-leak:     barrel re-export that must not fake a leak
           #   action-ref:        a Server Action passed by reference is legal
           for f in edge action-ref wildcard-leak frozen-build broken-tsconfig \
-                   no-baseurl server-only-alias next-demo; do
+                   no-baseurl server-only-alias symbol-global next-demo; do
             expect "$f" 0
           done
 

@@ -9,6 +9,7 @@ export default function Page() {
       <Client
         thing={new Thing(1)}
         sym={Symbol('x')}
+        kind={Symbol.for('chart')}
         when={new Date()}
         lookup={new Map()}
         label="hi"

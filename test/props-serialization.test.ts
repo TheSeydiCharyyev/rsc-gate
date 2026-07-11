@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { analyzeProject } from '../src/analyze.js';
+import { strictGate } from '../src/gate.js';
 
 const fx = fileURLToPath(new URL('../fixtures/serialize', import.meta.url));
 const a = analyzeProject(fx);
@@ -63,5 +64,26 @@ describe('serialization detectors (Ф3.1)', () => {
 
   it('flags new URL() as class-instance (negative case — must stay flagged)', () => {
     expect(verdictOf('url')).toBe('class-instance');
+  });
+});
+
+// Flight does not reject symbols, it rejects symbols it cannot name: it throws only
+// when `Symbol.for(name) !== value` (ReactFlightServer.js, react v19.0.0). A symbol
+// from the global registry crosses; an unregistered `Symbol('x')` does not. We flagged
+// both, so `Symbol.for(...)` failed --strict on a project React is perfectly happy with.
+describe('global symbols cross the boundary (false positive, fixed in 0.3.1)', () => {
+  it('does NOT flag Symbol.for() — the global registry round-trips through the key', () => {
+    expect(verdictOf('kind')).toBe('ok');
+  });
+
+  it('still flags bare Symbol() — unregistered, and Flight throws on it', () => {
+    expect(verdictOf('sym')).toBe('symbol');
+  });
+
+  // The direction 0.2.0 never asserted: a healthy project must not fail the gate.
+  it('leaves --strict green on a project whose only symbol is a global one', () => {
+    const healthy = analyzeProject(fileURLToPath(new URL('../fixtures/symbol-global', import.meta.url)));
+    expect(healthy.propFindings.filter((f) => f.kind !== 'spread')).toEqual([]);
+    expect(strictGate(healthy).failed).toBe(false);
   });
 });

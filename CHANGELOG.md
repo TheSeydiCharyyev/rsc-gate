@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-07-11
+
+**If you use `--strict`, upgrade.** A false positive failed a healthy project's CI.
+
+### Fixed (false positives — the project's #1 principle)
+
+- `Symbol.for(...)` is no longer flagged. Flight does not reject symbols, it rejects
+  symbols it cannot name: the check is `if (Symbol.for(name) !== value) throw`
+  (`ReactFlightServer.js`, react v19.0.0), so a symbol from the global registry
+  round-trips through its key and crosses the boundary — the thrown message says as
+  much ("Only global symbols received from `Symbol.for(...)` can be passed to Client
+  Components"). We matched `Symbol(...)` *and* `Symbol.for(...)`, so a legal prop was
+  reported as `NOT serializable` and `--strict` exited 2 on a project React is
+  perfectly happy with. An unregistered `Symbol('x')` is still flagged, and still
+  throws.
+
+  The `--strict` exit-code sweep added in 0.3.0 did not catch this because no fixture
+  passed a global symbol. `fixtures/symbol-global` now does, on the must-exit-0 side
+  of that sweep, next to `server-only-alias` — the 0.2.0 false positive it was built
+  for.
+
 ## [0.3.0] — 2026-07-11
 
 **If you use `--strict`, upgrade.** 0.2.0 shipped a false positive that fails a
