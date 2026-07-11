@@ -33,6 +33,7 @@ jobs:
           node dist/cli.js fixtures/jsconfig --no-color
           node dist/cli.js fixtures/nested-props --no-color
           node dist/cli.js fixtures/ns-tags --no-color
+          node dist/cli.js fixtures/monorepo --no-color
 
       - name: Bundle cost is reported from the committed build snapshot
         shell: bash

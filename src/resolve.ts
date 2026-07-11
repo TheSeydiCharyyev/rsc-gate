@@ -1,6 +1,6 @@
 import ts from 'typescript';
-import { existsSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 
 export const SOURCE_EXTS = ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs'];
 
@@ -9,16 +9,120 @@ export interface Resolver {
   resolve(fromFile: string, specifier: string): string | null;
 }
 
-function tryFile(base: string): string | null {
-  const candidates = [base, ...SOURCE_EXTS.map((e) => base + e), ...SOURCE_EXTS.map((e) => join(base, 'index' + e))];
-  for (const c of candidates) {
-    try {
-      if (existsSync(c) && statSync(c).isFile()) return c;
-    } catch {
-      /* ignore fs races */
+const isFile = (p: string): boolean => {
+  try {
+    return existsSync(p) && statSync(p).isFile();
+  } catch {
+    return false; // fs race, or a path we may not read
+  }
+};
+
+const isDir = (p: string): boolean => {
+  try {
+    return existsSync(p) && statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+/** A file, with or without an extension. Directories are handled separately. */
+function tryFileOnly(base: string): string | null {
+  for (const c of [base, ...SOURCE_EXTS.map((e) => base + e)]) if (isFile(c)) return c;
+  return null;
+}
+
+/**
+ * The conditions a bundler picks for a Next app, most specific first. `require`
+ * comes last: it usually points at a CJS build, which is the least useful thing
+ * to analyze when the ESM source is right there.
+ */
+const EXPORT_CONDITIONS = ['import', 'module', 'browser', 'default', 'require'];
+
+/** Walk a package.json "exports" value down to a path, honouring conditions. */
+function pickCondition(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      const hit = pickCondition(v);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    for (const c of EXPORT_CONDITIONS) {
+      if (c in obj) {
+        const hit = pickCondition(obj[c]);
+        if (hit) return hit;
+      }
     }
   }
   return null;
+}
+
+/**
+ * The entry file of a package directory: its `exports` map, else `module`/`main`,
+ * else an index file. Without this a workspace package — the normal way a monorepo
+ * shares client components — resolved to nothing, so every component inside it,
+ * and every leak inside those, was invisible.
+ */
+function packageEntry(pkgDir: string, subpath: string): string | null {
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as Record<string, unknown>;
+  } catch {
+    return null; // no package.json, or malformed — fall back to index
+  }
+
+  const exp = pkg.exports;
+  if (exp !== undefined) {
+    let target: unknown;
+    if (typeof exp === 'string' || Array.isArray(exp)) {
+      if (subpath === '.') target = exp;
+    } else if (exp && typeof exp === 'object') {
+      const map = exp as Record<string, unknown>;
+      const keys = Object.keys(map);
+      if (keys.some((k) => k.startsWith('.'))) {
+        if (map[subpath] !== undefined) {
+          target = map[subpath];
+        } else {
+          for (const k of keys) {
+            const star = k.indexOf('*');
+            if (star === -1) continue;
+            const pre = k.slice(0, star);
+            const post = k.slice(star + 1);
+            if (!subpath.startsWith(pre) || !subpath.endsWith(post)) continue;
+            const filled = subpath.slice(pre.length, subpath.length - post.length);
+            const pattern = pickCondition(map[k]);
+            if (pattern) target = pattern.replace('*', filled);
+            break;
+          }
+        }
+      } else if (subpath === '.') {
+        target = exp; // a bare conditions map, e.g. { "import": "./src/index.tsx" }
+      }
+    }
+
+    const rel = typeof target === 'string' ? target : pickCondition(target);
+    // `exports` is authoritative: if it does not expose this subpath, nothing does.
+    return rel ? tryFileOnly(resolve(pkgDir, rel)) : null;
+  }
+
+  for (const field of ['module', 'main']) {
+    const v = pkg[field];
+    if (typeof v === 'string') {
+      const hit = tryFileOnly(resolve(pkgDir, v));
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function tryFile(base: string): string | null {
+  const direct = tryFileOnly(base);
+  if (direct) return direct;
+  if (!isDir(base)) return null;
+  return packageEntry(base, '.') ?? tryFileOnly(join(base, 'index'));
 }
 
 /** tsconfig "paths" (prefix + exact) and bare-specifier resolution via "baseUrl". */
@@ -126,7 +230,50 @@ export function createResolver(projectRoot: string): Resolver {
         if (hit) return hit;
       }
 
-      return null; // external package
+      // A workspace package: `@acme/ui` is a node_modules symlink back into the
+      // repo, which is how a monorepo shares client components. Its real path is
+      // inside the project, so its files are already in the graph — only the edge
+      // was missing, and every leak behind it stayed invisible.
+      //
+      // The guard is what keeps this honest: a *third-party* package resolves
+      // outside the project and stays external. We do not analyze node_modules.
+      return workspaceFile(fromFile, specifier);
     },
   };
+
+  function workspaceFile(fromFile: string, specifier: string): string | null {
+    const scoped = specifier.startsWith('@');
+    const parts = specifier.split('/');
+    const name = scoped ? parts.slice(0, 2).join('/') : parts[0];
+    const subpath = parts.slice(scoped ? 2 : 1).join('/');
+
+    for (let dir = dirname(fromFile); ; ) {
+      const pkgDir = join(dir, 'node_modules', name);
+      if (isDir(pkgDir)) {
+        const hit = subpath
+          ? (packageEntry(pkgDir, './' + subpath) ?? tryFile(join(pkgDir, subpath)))
+          : packageEntry(pkgDir, '.');
+        if (!hit) return null;
+
+        // Follow the symlink: the graph is keyed by the real files under the
+        // project, not by the node_modules path that points at them.
+        let real: string;
+        try {
+          real = realpathSync(hit);
+        } catch {
+          return null;
+        }
+        // Inside the project AND outside node_modules. A workspace package's real
+        // files are repo source; a third-party package's are not, even though its
+        // node_modules folder technically sits inside the project. We never
+        // analyze node_modules.
+        const inside = relative(projectRoot, real);
+        if (!inside || inside.startsWith('..')) return null;
+        return inside.split(/[\\/]/).includes('node_modules') ? null : real;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+    }
+  }
 }

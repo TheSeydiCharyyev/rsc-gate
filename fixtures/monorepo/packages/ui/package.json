@@ -1,0 +1,7 @@
+{
+  "name": "@acme/ui",
+  "version": "1.0.0",
+  "exports": {
+    ".": { "import": "./src/index.tsx", "default": "./src/index.tsx" }
+  }
+}

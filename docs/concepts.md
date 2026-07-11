@@ -150,6 +150,20 @@ The config is `tsconfig.json`, or `jsconfig.json` in a JavaScript project. If bo
 exist, `tsconfig.json` wins and `jsconfig.json` is ignored — the same rule Next
 and tsc apply.
 
+**Workspace packages.** A specifier that lands on a directory is resolved through
+its `package.json`: the `exports` map (conditions and `./*` subpaths), else
+`module`/`main`, else an index file. A bare `@acme/ui` also resolves through the
+`node_modules` symlink a package manager creates for a workspace — so the client
+components a monorepo shares that way are analyzed like any others.
+
+Third-party packages stay external. rsc-gate never analyzes `node_modules`: a
+workspace link points at repo source, a real dependency does not, and that is the
+difference it goes by.
+
+The analysis is rooted where you point it. A package *outside* that directory —
+`apps/web` importing `packages/ui` from the repo root — is out of scope; run
+rsc-gate at the repo root, or on the package itself.
+
 ## CommonJS
 
 `require('./x')` is an edge, and is followed. It pulls the whole module and runs

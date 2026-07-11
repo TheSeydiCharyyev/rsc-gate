@@ -59,6 +59,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ordinary module — and `--strict` failed a healthy build. The specifier now has to
   still resolve to the package, not to a file in the project.
 
+- A workspace package now resolves through its `package.json`. Sharing client
+  components through a workspace package is *the* monorepo pattern, and rsc-gate
+  resolved such an import to nothing — so the components inside the package, the
+  boundaries they form, the props handed across them and any `server-only` leak
+  they carry were all invisible, and `--strict` passed the project green. The
+  `exports` map is honoured (conditions and `./*` subpath patterns included), with
+  `module`/`main` and an index file as fallbacks, and a bare `@acme/ui` resolves
+  through the `node_modules` symlink a package manager creates for a workspace.
+
+  A genuine third-party package stays external. "Inside the project directory" is
+  not the test — `node_modules` sits inside the project too. The real path has to
+  be repo *source*, outside `node_modules`, which is exactly what a workspace link
+  points at and what a third-party dependency never is.
+
+  Note the analysis is still rooted at the directory you point it at: a package
+  that lives *outside* that directory (`apps/web` importing `packages/ui` from the
+  repo root) is out of scope — run rsc-gate at the root, or on the package itself.
+
 - `jsconfig.json` is now read. A JavaScript Next project declares its aliases
   there, not in `tsconfig.json` — and rsc-gate looked only at `tsconfig.json`, so
   every alias in such a project was dropped, the import graph collapsed to the
