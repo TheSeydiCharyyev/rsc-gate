@@ -8,6 +8,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (false negatives)
 
+- Props of a namespaced tag — `<UI.Button onClick={fn} />` — are now checked. The
+  tag name is a property access, not an identifier, so it matched nothing: the
+  boundary itself was found and reported, but everything handed across it went
+  unlooked-at. Both shapes are covered — `import * as UI from './ui'`, and a barrel
+  that does `export * as widgets from './widgets'` with the importer binding
+  `widgets` by name. A server component behind the same namespace is still left
+  alone: the tag being namespaced does not make it a boundary.
+
 - A hazard buried inside a prop is now found. React serializes a prop by walking
   into it, so `onPick={{ handler: () => {} }}` throws at prerender exactly as
   `onPick={() => {}}` does — but only the top level of each prop was inspected, so

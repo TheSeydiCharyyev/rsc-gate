@@ -198,6 +198,9 @@ export function analyzeProps(
     const actionLocals = new Set<string>();
     // locals bound to a plain (non-action) function exported by another module
     const importedFns = new Set<string>();
+    // `import * as UI from './ui'` → 'UI' → the module it points at, so that a
+    // namespaced tag `<UI.Button>` can be resolved to the component it renders.
+    const namespaceLocals = new Map<string, string>();
     // locals bound to next/dynamic and React.lazy — the lazy-component factories
     const lazyFactories = new Set<string>();
     const reactNamespaces = new Set<string>();
@@ -213,6 +216,7 @@ export function analyzeProps(
       }
       const target = resolver.resolve(file, imp.specifier);
       if (!target) continue;
+      if (imp.namespaceLocal) namespaceLocals.set(imp.namespaceLocal, target);
       for (const b of imp.bindings) {
         const origin = resolveExportOrigin(nodes, resolver, target, b.imported);
         if (!origin) continue;
@@ -230,6 +234,15 @@ export function analyzeProps(
           const kind = exportedFunctionKinds(origin, exportKinds).get(b.imported);
           if (kind === 'function') importedFns.add(b.local);
           else if (kind === 'action') actionLocals.add(b.local);
+        }
+
+        // The other way a namespaced tag arrives: a barrel does
+        // `export * as widgets from './widgets'`, and the importer binds `widgets`
+        // by name. The local is a namespace object over that module, not a value.
+        const nsReexport = nodes.get(origin)?.parsed.reexports.find((re) => re.ns === b.imported);
+        if (nsReexport) {
+          const nsTarget = resolver.resolve(origin, nsReexport.specifier);
+          if (nsTarget) namespaceLocals.set(b.local, nsTarget);
         }
       }
     }
@@ -290,7 +303,23 @@ export function analyzeProps(
       collectLazy(sf);
     }
 
-    if (clientTags.size === 0) continue;
+    if (clientTags.size === 0 && namespaceLocals.size === 0) continue;
+
+    /**
+     * `<UI.Button>` — a namespaced tag. The tag name is a property access, not an
+     * identifier, so it matched nothing and its props were never checked, even
+     * though the boundary itself was found. Resolve `Button` through the namespace's
+     * module; only a `"use client"` origin is a boundary, so `<UI.ServerCard>` is
+     * still left alone.
+     */
+    const namespacedTagOrigin = (tag: ts.JsxTagNameExpression): string | null => {
+      if (!ts.isPropertyAccessExpression(tag) || !ts.isIdentifier(tag.expression)) return null;
+      const target = namespaceLocals.get(tag.expression.text);
+      if (!target) return null;
+      const origin = resolveExportOrigin(nodes, resolver, target, tag.name.text);
+      if (!origin) return null;
+      return nodes.get(origin)?.parsed.directive === 'use client' ? origin : null;
+    };
 
     // Top-level local functions — passing one as a prop is the same hazard as an inline
     // arrow, EXCEPT a function whose body opens with "use server" is a Server Action and
@@ -405,22 +434,27 @@ export function analyzeProps(
         tag = n.openingElement.tagName;
         attrs = n.openingElement.attributes;
       }
-      if (tag && attrs && ts.isIdentifier(tag) && clientTags.has(tag.text)) {
-        const componentFile = rel(clientTags.get(tag.text)!);
-        const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
-        const props = attrs.properties.map(classify);
-        crossings.push({ file: rel(file), component: tag.text, componentFile, line, props });
-        for (const p of props) {
-          if (p.verdict === 'ok') continue;
-          findings.push({
-            file: rel(file),
-            component: tag.text,
-            componentFile,
-            prop: p.name,
-            kind: p.verdict,
-            line,
-            message: MESSAGES[p.verdict],
-          });
+      if (tag && attrs) {
+        const origin =
+          ts.isIdentifier(tag) && clientTags.has(tag.text) ? clientTags.get(tag.text)! : namespacedTagOrigin(tag);
+        if (origin) {
+          const component = tag.getText(sf); // 'Button' or 'UI.Button'
+          const componentFile = rel(origin);
+          const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+          const props = attrs.properties.map(classify);
+          crossings.push({ file: rel(file), component, componentFile, line, props });
+          for (const p of props) {
+            if (p.verdict === 'ok') continue;
+            findings.push({
+              file: rel(file),
+              component,
+              componentFile,
+              prop: p.name,
+              kind: p.verdict,
+              line,
+              message: MESSAGES[p.verdict],
+            });
+          }
         }
       }
       ts.forEachChild(n, visit);

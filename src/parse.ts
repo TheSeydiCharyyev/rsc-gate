@@ -11,6 +11,8 @@ export interface ImportEntry {
   bindings: { local: string; imported: string }[];
   /** import * as X — pulls everything */
   namespace: boolean;
+  /** Local name of a namespace import: `import * as UI` → 'UI'. Lets `<UI.Button>` be resolved. */
+  namespaceLocal?: string;
   sideEffectOnly: boolean;
   /** import('…') anywhere in the module — a lazy edge, loads in the importer's env. */
   dynamic?: boolean;
@@ -91,6 +93,7 @@ export function parseModule(file: string): ParsedModule {
       if (clause?.namedBindings) {
         if (ts.isNamespaceImport(clause.namedBindings)) {
           entry.namespace = true;
+          entry.namespaceLocal = clause.namedBindings.name.text;
         } else {
           for (const el of clause.namedBindings.elements) {
             if (el.isTypeOnly) continue;
