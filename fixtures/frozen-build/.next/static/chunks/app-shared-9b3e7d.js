@@ -1,0 +1,1 @@
+(self.webpackChunk_N_E=self.webpackChunk_N_E||[]).push([[281],{4118:(e,t,n)=>{"use strict";n.r(t),n.d(t,{Card:()=>i});var r=n(5155);function i(e){let{title:t}=e;return(0,r.jsx)("section",{children:t})}},8204:(e,t,n)=>{"use strict";n.r(t),n.d(t,{Badge:()=>i});var r=n(5155);function i(e){let{label:t}=e;return(0,r.jsx)("span",{children:t})}}}]);

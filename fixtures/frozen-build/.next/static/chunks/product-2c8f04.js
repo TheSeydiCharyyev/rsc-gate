@@ -1,0 +1,1 @@
+(self.webpackChunk_N_E=self.webpackChunk_N_E||[]).push([[733],{3390:(e,t,n)=>{"use strict";n.r(t),n.d(t,{ProductCard:()=>i});var r=n(5155);function i(e){let{id:t}=e;return(0,r.jsx)("article",{children:t})}}}]);

@@ -4,3 +4,9 @@ dist/
 .DS_Store
 .next/
 next-env.d.ts
+
+# …except the frozen build snapshot, which is committed on purpose: it is the
+# only bundle-cost coverage that survives a clean checkout (fixtures/next-demo
+# has a real .next/, but it is ignored, so its tests skip in CI).
+!fixtures/frozen-build/.next/
+!fixtures/frozen-build/.next/**

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { analyzeProject } from '../src/analyze.js';
 import { parseManifestText, readBuildInfo } from '../src/buildinfo.js';
 
 const SAMPLE = `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};
@@ -85,5 +86,101 @@ describe.skipIf(!hasBuild)('readBuildInfo on a real Next 16 build', () => {
     expect(info.appBytes).toBeGreaterThan(0);
     expect(info.appBytes).toBeLessThan(20_000);
     expect(info.appGzipBytes).toBeLessThan(info.appBytes);
+  });
+});
+
+// #14: the suite above skips on a clean checkout — fixtures/next-demo/.next is
+// gitignored — so bundle cost, one of the three features, shipped with no CI
+// coverage at all. fixtures/frozen-build carries a committed .next snapshot, so
+// everything below runs everywhere. No skipIf: if this cannot run, it must fail.
+const frozen = fileURLToPath(new URL('../fixtures/frozen-build', import.meta.url));
+
+// Sizes of the committed chunks. Exact on purpose: they are what proves cost is
+// attributed to the right module. (.gitattributes pins `* -text` so core.autocrlf
+// cannot make a Windows worktree disagree with Linux CI about these numbers.)
+const FRAMEWORK_BYTES = 741;
+const SHARED_BYTES = 345; // Card + Badge
+const PRODUCT_BYTES = 211; // ProductCard, reached only via the [id] route
+
+describe('readBuildInfo on the frozen build snapshot (#14)', () => {
+  const analysis = analyzeProject(frozen);
+  const clientFiles = analysis.modules.filter((m) => m.directive === 'use client').map((m) => m.file);
+  const info = readBuildInfo(frozen, clientFiles)!;
+  const cost = (file: string) => info.moduleCosts.find((m) => m.file === file)!;
+
+  it('runs at all — the snapshot is committed, not gitignored', () => {
+    expect(existsSync(join(frozen, '.next', 'server', 'app'))).toBe(true);
+    expect(info).not.toBeNull();
+  });
+
+  it('matches every project client module through the analyzer, by path suffix', () => {
+    // The manifest says "[project]/fixtures/frozen-build/components/Card.tsx";
+    // the analyzer says "components/Card.tsx". The suffix match is the join.
+    expect(clientFiles.sort()).toEqual([
+      'components/Badge.tsx',
+      'components/Card.tsx',
+      'components/ProductCard.tsx',
+    ]);
+    expect(info.moduleCosts.map((m) => m.file).sort()).toEqual([
+      'components/Badge.tsx',
+      'components/Card.tsx',
+      'components/ProductCard.tsx',
+    ]);
+  });
+
+  it('never bills a node_modules module to the project', () => {
+    expect(info.moduleCosts.some((m) => m.file.includes('node_modules'))).toBe(false);
+    expect(info.moduleCosts.some((m) => m.file.includes('layout-router'))).toBe(false);
+  });
+
+  it('splits framework chunks from own chunks', () => {
+    const card = cost('components/Card.tsx');
+    expect(card.ownBytes).toBe(SHARED_BYTES);
+    expect(card.frameworkBytes).toBe(FRAMEWORK_BYTES);
+
+    const framework = card.chunks.find((c) => c.url.includes('framework-'))!;
+    expect(framework.framework).toBe(true);
+    expect(framework.bytes).toBe(FRAMEWORK_BYTES);
+
+    const own = card.chunks.find((c) => c.url.includes('app-shared-'))!;
+    expect(own.framework).toBe(false);
+    expect(own.bytes).toBe(SHARED_BYTES);
+  });
+
+  it('reports the two modules that share a chunk, in both directions', () => {
+    const shared = (file: string) =>
+      cost(file).chunks.find((c) => c.url.includes('app-shared-'))!.sharedWith;
+    expect(shared('components/Card.tsx')).toEqual(['components/Badge.tsx']);
+    expect(shared('components/Badge.tsx')).toEqual(['components/Card.tsx']);
+
+    // ProductCard is alone in its chunk — sharedWith must not invent a peer.
+    expect(cost('components/ProductCard.tsx').chunks.find((c) => c.url.includes('product-'))!.sharedWith).toEqual(
+      [],
+    );
+  });
+
+  it('counts a shared chunk once in the app total', () => {
+    // Card and Badge each carry the 345 B chunk, but the app ships it once.
+    const perModule = info.moduleCosts.reduce((s, m) => s + m.ownBytes, 0);
+    expect(perModule).toBe(SHARED_BYTES * 2 + PRODUCT_BYTES); // 901 — the naive sum
+    expect(info.appBytes).toBe(SHARED_BYTES + PRODUCT_BYTES); // 556 — the honest one
+    expect(info.appGzipBytes).toBeGreaterThan(0);
+    expect(info.appGzipBytes).toBeLessThan(info.appBytes);
+  });
+
+  it('gives a dynamic [id] route a non-zero cost (FP #8 stays fixed)', () => {
+    const product = cost('components/ProductCard.tsx');
+    expect(product.ownBytes).toBe(PRODUCT_BYTES);
+    expect(product.ownBytes).toBeGreaterThan(0);
+
+    // The route is only reachable through the "/products/[id]/page" manifest key,
+    // so a parser that chokes on the "]" reports this module at 0 B.
+    const manifest = readFileSync(
+      join(frozen, '.next', 'server', 'app', 'products', '[id]', 'page_client-reference-manifest.js'),
+      'utf8',
+    );
+    expect(parseManifestText(manifest).some((e) => e.modulePath.endsWith('components/ProductCard.tsx'))).toBe(
+      true,
+    );
   });
 });

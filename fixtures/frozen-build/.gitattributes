@@ -1,0 +1,4 @@
+# This is a frozen build snapshot: the tests assert exact chunk byte sizes, so
+# git must never rewrite line endings here (core.autocrlf would make the sizes
+# differ between a Windows worktree and Linux CI).
+* -text

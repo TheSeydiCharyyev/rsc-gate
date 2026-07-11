@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `fixtures/frozen-build/` — a committed snapshot of a Next build, so bundle
+  cost is finally covered by CI. `fixtures/next-demo/` has a real `.next/`, but
+  `.gitignore` keeps it out of the repository, so its tests were guarded by
+  `skipIf` and simply never ran on a clean checkout: one of the tool's three
+  features had **no CI coverage at all**. Confirmed by mutation — dropping
+  `sharedWith`, billing framework chunks to the app, or double-counting a shared
+  chunk in `appBytes` each left CI fully green before this fixture, and each
+  fails now. The snapshot pins the framework/own split, chunk sharing between two
+  modules, `appBytes` counting a shared chunk once, and a dynamic `[id]` route
+  reporting a non-zero cost. `.gitattributes` marks it `-text`: the tests assert
+  exact byte sizes, and `core.autocrlf` would otherwise have a Windows worktree
+  and Linux CI disagree about every one of them.
+
 ### Changed
 
 - The CLI now rejects an argument line it cannot honour instead of guessing.

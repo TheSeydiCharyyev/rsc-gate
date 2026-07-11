@@ -27,6 +27,13 @@ jobs:
         run: |
           node dist/cli.js fixtures/demo --no-color
           node dist/cli.js fixtures/edge --no-color
+          node dist/cli.js fixtures/frozen-build --no-color
+
+      - name: Bundle cost is reported from the committed build snapshot
+        shell: bash
+        run: |
+          node dist/cli.js fixtures/frozen-build --no-color | grep -q "BUNDLE COST" \
+            || { echo "no BUNDLE COST section — the frozen .next snapshot is not being read"; exit 1; }
       - name: Strict gate catches the planted hazard
         shell: bash
         run: |
