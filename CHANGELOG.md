@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (false positives — the project's #1 principle)
+
+- `jsconfig.json` is now read. A JavaScript Next project declares its aliases
+  there, not in `tsconfig.json` — and rsc-gate looked only at `tsconfig.json`, so
+  every alias in such a project was dropped, the import graph collapsed to the
+  entry files, and the report came back empty. An entire class of projects got a
+  clean all-clear without being looked at. `tsconfig.json` still wins when both
+  exist, as it does for Next and tsc: the project is a TypeScript one and
+  `jsconfig` is ignored.
+
 ### Fixed
 
 - A symlink cycle in the project tree no longer kills the analysis. The walk

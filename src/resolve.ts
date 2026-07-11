@@ -31,10 +31,18 @@ export function createResolver(projectRoot: string): Resolver {
    * folders and shadow real packages.
    */
   let bareBase: string | null = null;
+  // A JS Next project configures its aliases in jsconfig.json — same shape, same
+  // meaning. Reading only tsconfig.json meant every alias in such a project was
+  // dropped, the graph collapsed to the entries, and the report came back empty.
+  // tsconfig wins when both exist, as it does for Next and tsc: the project is a
+  // TypeScript one and jsconfig is ignored.
+  //
   // Forward slashes: TS normalizes paths in diagnostics, and a backslash path
   // makes it throw a Debug Failure on malformed JSON instead of degrading.
-  const tsconfigPath = join(projectRoot, 'tsconfig.json').replaceAll('\\', '/');
-  if (existsSync(tsconfigPath)) {
+  const tsconfigPath = ['tsconfig.json', 'jsconfig.json']
+    .map((name) => join(projectRoot, name).replaceAll('\\', '/'))
+    .find((p) => existsSync(p));
+  if (tsconfigPath) {
     // Load the config through TS itself so "extends" chains are merged (FP #9)
     // — presets/monorepos declare paths in a base config, and readConfigFile
     // alone would silently drop them (empty graph reads as "all clean").

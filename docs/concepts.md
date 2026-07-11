@@ -133,6 +133,10 @@ exist, rsc-gate reports nothing rather than reaching for `baseUrl` — because t
 is what tsc does, and a resolution tsc does not make is an edge the bundler will
 not make either.
 
+The config is `tsconfig.json`, or `jsconfig.json` in a JavaScript project. If both
+exist, `tsconfig.json` wins and `jsconfig.json` is ignored — the same rule Next
+and tsc apply.
+
 ## CommonJS
 
 `require('./x')` is an edge, and is followed. It pulls the whole module and runs
