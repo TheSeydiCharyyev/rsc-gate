@@ -10,3 +10,8 @@ next-env.d.ts
 # has a real .next/, but it is ignored, so its tests skip in CI).
 !fixtures/frozen-build/.next/
 !fixtures/frozen-build/.next/**
+
+# The LinkedIn cut. demo.gif is committed (the README embeds it); the mp4 is a
+# 1 MB upload artifact that scripts/make-demo regenerates byte-for-byte on demand.
+assets/demo.mp4
+scripts/make-demo/.work/
