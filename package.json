@@ -1,6 +1,6 @@
 {
   "name": "rsc-gate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Catch React Server Component boundary bugs before next build — non-serializable props, server-only leaks, and accidental client bundling — in CI and your editor.",
   "type": "module",
   "bin": {
