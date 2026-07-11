@@ -181,8 +181,12 @@ export function analyzeProject(projectRoot: string): Analysis {
     queue.push({ file: target, env, chain: [...from.chain, target], names });
   };
 
-  while (queue.length > 0) {
-    const item = queue.shift()!;
+  // Walk with a read cursor rather than shift(): shifting re-indexes the whole
+  // array each time, which is quadratic in the queue length. The queue is as long
+  // as the widest fan-out in the graph — a barrel re-exporting a thousand
+  // components makes it a thousand long.
+  for (let head = 0; head < queue.length; head++) {
+    const item = queue[head];
     const node = nodes.get(item.file);
     if (!node) continue;
 

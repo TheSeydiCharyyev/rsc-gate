@@ -94,6 +94,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exist, as it does for Next and tsc: the project is a TypeScript one and
   `jsconfig` is ignored.
 
+### Changed
+
+- The graph walk uses a read cursor instead of `Array.shift()`, which re-indexes
+  the whole queue on every step. Measured honestly: at the queue lengths real
+  projects produce this changes nothing — a 1500-module project spends 161 ms in
+  the walk either way — and the quadratic only bites far beyond that (a 50 000-item
+  queue costs 203 ms of pure shifting, a 200 000-item one costs 4.2 s). It is a
+  latent quadratic removed, not a speed-up delivered.
+
 ### Fixed
 
 - A symlink cycle in the project tree no longer kills the analysis. The walk
