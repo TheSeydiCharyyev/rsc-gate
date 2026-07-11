@@ -4,49 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] — 2026-07-11
 
-### Fixed (false negatives)
+**If you use `--strict`, upgrade.** 0.2.0 shipped a false positive that fails a
+healthy project's CI: a `"server-only"` import aliased to a local shim was
+reported as a leak, and because 0.2.0 also made `--strict` gate leaks, a
+cosmetic lie became a broken build. That is fixed here, along with a second
+false positive in bundle cost — and the release checks grew the assertion that
+would have caught both: every fixture's `--strict` exit code is now verified in
+CI, in both directions, because a gate that fires on healthy code is the worst
+bug this tool can have.
 
-- Props of a namespaced tag — `<UI.Button onClick={fn} />` — are now checked. The
-  tag name is a property access, not an identifier, so it matched nothing: the
-  boundary itself was found and reported, but everything handed across it went
-  unlooked-at. Both shapes are covered — `import * as UI from './ui'`, and a barrel
-  that does `export * as widgets from './widgets'` with the importer binding
-  `widgets` by name. A server component behind the same namespace is still left
-  alone: the tag being namespaced does not make it a boundary.
-
-- A hazard buried inside a prop is now found. React serializes a prop by walking
-  into it, so `onPick={{ handler: () => {} }}` throws at prerender exactly as
-  `onPick={() => {}}` does — but only the top level of each prop was inspected, so
-  a function inside an object, an array, a ternary, a `??`/`||` branch or an object
-  method shorthand all read as `ok`. A project whose hazards were all one level
-  down passed `--strict` green and then failed `next build`.
-
-  The walk stops where the value stops being knowable: a call result, a template
-  literal or a nested JSX element is opaque, and guessing at it would mean
-  inventing findings.
-
-- An imported function passed as a prop is now flagged, like a local one. Only
-  functions *declared in the calling file* were tracked, so `import { helper }` and
-  then `<Client cb={helper} />` was reported as fine. Server Actions are still
-  legal — imported from a `"use server"` module, or a function whose body opens
-  with the directive — and a client component passed as a prop stays legal too: it
-  is a client *reference*, which React does serialize.
-
-- Props of a lazily loaded client component are now checked. `const Chart =
-  dynamic(() => import('./Chart'))` arrives as a *local variable*, not an import
-  binding, and the set of known client tags was built from import bindings alone —
-  so `<Chart onSelect={fn} />` was not recognized as crossing a boundary and its
-  props were never looked at. The hazard was invisible to the report and to
-  `--strict`: a project whose only unserializable prop sat on a lazy component
-  passed the gate green. `React.lazy` is the same boundary and is handled too.
-
-  Registering the tag requires the lazily loaded module to actually be
-  `"use client"`. A *server* component loaded through `dynamic()` crosses no
-  boundary, so its props are still not flagged — a lazy import is not a boundary
-  by itself, and saying otherwise would be a false positive. A non-literal
-  `import(someVar)` does not become a tag either.
+The rest of the release closes the last of the audit backlog: whole classes of
+project that rsc-gate could not see at all — JavaScript projects, monorepo
+workspace packages — and a set of hazards it looked straight past.
 
 ### Fixed (false positives — the project's #1 principle)
 
@@ -94,6 +65,75 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exist, as it does for Next and tsc: the project is a TypeScript one and
   `jsconfig` is ignored.
 
+### Fixed (false negatives)
+
+- Props of a namespaced tag — `<UI.Button onClick={fn} />` — are now checked. The
+  tag name is a property access, not an identifier, so it matched nothing: the
+  boundary itself was found and reported, but everything handed across it went
+  unlooked-at. Both shapes are covered — `import * as UI from './ui'`, and a barrel
+  that does `export * as widgets from './widgets'` with the importer binding
+  `widgets` by name. A server component behind the same namespace is still left
+  alone: the tag being namespaced does not make it a boundary.
+
+- A hazard buried inside a prop is now found. React serializes a prop by walking
+  into it, so `onPick={{ handler: () => {} }}` throws at prerender exactly as
+  `onPick={() => {}}` does — but only the top level of each prop was inspected, so
+  a function inside an object, an array, a ternary, a `??`/`||` branch or an object
+  method shorthand all read as `ok`. A project whose hazards were all one level
+  down passed `--strict` green and then failed `next build`.
+
+  The walk stops where the value stops being knowable: a call result, a template
+  literal or a nested JSX element is opaque, and guessing at it would mean
+  inventing findings.
+
+- An imported function passed as a prop is now flagged, like a local one. Only
+  functions *declared in the calling file* were tracked, so `import { helper }` and
+  then `<Client cb={helper} />` was reported as fine. Server Actions are still
+  legal — imported from a `"use server"` module, or a function whose body opens
+  with the directive — and a client component passed as a prop stays legal too: it
+  is a client *reference*, which React does serialize.
+
+- Props of a lazily loaded client component are now checked. `const Chart =
+  dynamic(() => import('./Chart'))` arrives as a *local variable*, not an import
+  binding, and the set of known client tags was built from import bindings alone —
+  so `<Chart onSelect={fn} />` was not recognized as crossing a boundary and its
+  props were never looked at. The hazard was invisible to the report and to
+  `--strict`: a project whose only unserializable prop sat on a lazy component
+  passed the gate green. `React.lazy` is the same boundary and is handled too.
+
+  Registering the tag requires the lazily loaded module to actually be
+  `"use client"`. A *server* component loaded through `dynamic()` crosses no
+  boundary, so its props are still not flagged — a lazy import is not a boundary
+  by itself, and saying otherwise would be a false positive. A non-literal
+  `import(someVar)` does not become a tag either.
+
+### Fixed
+
+- A symlink cycle in the project tree no longer kills the analysis. The walk
+  followed links with `statSync` and recursed through `components/self/components/
+  self/…` until the OS refused with `ELOOP` — rsc-gate died with an unhandled fs
+  error instead of reporting on the project. The visited set is now keyed on the
+  *real* path, so a cycle stops at the first repeat.
+
+  Links are still followed, deliberately: a symlinked source directory is a real
+  monorepo pattern, and skipping it would drop those modules from the graph —
+  a silent false negative in exactly the projects that use them. A file reachable
+  by two paths is analyzed once, not twice, and a dangling link is skipped rather
+  than thrown on.
+
+### Changed
+
+- **`engines` is now `>=20`, was `>=18`.** The CI matrix only ever ran node 20
+  and 22, so the package promised a version nobody tested. The tsup target moved
+  with it, so the build config and the promise agree.
+
+- The graph walk uses a read cursor instead of `Array.shift()`, which re-indexes
+  the whole queue on every step. Measured honestly: at the queue lengths real
+  projects produce this changes nothing — a 1500-module project spends 161 ms in
+  the walk either way — and the quadratic only bites far beyond that (a 50 000-item
+  queue costs 203 ms of pure shifting, a 200 000-item one costs 4.2 s). It is a
+  latent quadratic removed, not a speed-up delivered.
+
 ### Added
 
 - Lazy edges are visible. A boundary reached through `import()`, `next/dynamic` or
@@ -111,29 +151,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   many missing edges this release found, that second reading is worth surfacing.
   Notes appear under `NOTES`, are exposed as `Analysis.notes`, and gate nothing:
   `--strict` ignores them entirely.
-
-### Changed
-
-- The graph walk uses a read cursor instead of `Array.shift()`, which re-indexes
-  the whole queue on every step. Measured honestly: at the queue lengths real
-  projects produce this changes nothing — a 1500-module project spends 161 ms in
-  the walk either way — and the quadratic only bites far beyond that (a 50 000-item
-  queue costs 203 ms of pure shifting, a 200 000-item one costs 4.2 s). It is a
-  latent quadratic removed, not a speed-up delivered.
-
-### Fixed
-
-- A symlink cycle in the project tree no longer kills the analysis. The walk
-  followed links with `statSync` and recursed through `components/self/components/
-  self/…` until the OS refused with `ELOOP` — rsc-gate died with an unhandled fs
-  error instead of reporting on the project. The visited set is now keyed on the
-  *real* path, so a cycle stops at the first repeat.
-
-  Links are still followed, deliberately: a symlinked source directory is a real
-  monorepo pattern, and skipping it would drop those modules from the graph —
-  a silent false negative in exactly the projects that use them. A file reachable
-  by two paths is analyzed once, not twice, and a dangling link is skipped rather
-  than thrown on.
 
 ## [0.2.0] — 2026-07-11
 
@@ -371,5 +388,6 @@ before build, in CI and the editor.
 - `--strict` — exit code `2` on a serialization hazard, for CI.
 - `--json`, `--no-build`, `--no-color` flags.
 
+[0.3.0]: https://github.com/TheSeydiCharyyev/rsc-gate/releases/tag/v0.3.0
 [0.2.0]: https://github.com/TheSeydiCharyyev/rsc-gate/releases/tag/v0.2.0
 [0.1.0]: https://github.com/TheSeydiCharyyev/rsc-gate/releases/tag/v0.1.0

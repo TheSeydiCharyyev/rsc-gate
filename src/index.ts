@@ -1,5 +1,5 @@
 export { analyzeProject } from './analyze.js';
-export type { Analysis, Boundary, Env, ModuleReport, ServerOnlyViolation } from './analyze.js';
+export type { Analysis, AnalysisNote, Boundary, Env, ModuleReport, ServerOnlyViolation } from './analyze.js';
 export { parseModule } from './parse.js';
 export type { ParsedModule, ImportEntry, ReexportEntry, Directive } from './parse.js';
 export { readBuildInfo, parseManifestText } from './buildinfo.js';
